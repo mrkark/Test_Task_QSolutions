@@ -13,21 +13,50 @@ chmod +x run.sh
 
 ---
 
-## Стандартная установка и запуск
+## Стандартная установка
 
 ```bash
 pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
-### Запуск (использует `input.csv`):
+---
+
+## Запуск веб-сервиса (Test Task 2)
+
+Сервис сохраняет видео в папку `uploads/` и фиксирует записи в базе данных SQLite `videos.db`.
+
+```bash
+python web_service.py
+```
+По умолчанию сервис слушает на `0.0.0.0:8000`.
+
+---
+
+## Запуск записи видео
+
+### Стандартный запуск без сервера:
 ```bash
 python capture_video.py
 ```
 
-### Запуск с указанием своего CSV-файла:
+### Запуск с автоматической загрузкой на сервер и предпросмотром в браузере:
 ```bash
-python capture_video.py path/to/custom_input.csv
+python capture_video.py --server http://127.0.0.1:8000 --view-seconds 5
+```
+
+Параметры:
+- `--server <URL>`: адрес сервера для загрузки каждого видео.
+- `--view-seconds <N>`: время показа превью в Chromium (если `> 0` — закрывается через N секунд, если `0` — ожидает нажатия Enter).
+- Путь к кастомному CSV можно передать позиционным аргументом, например: `python capture_video.py custom.csv --server http://127.0.0.1:8000`.
+
+---
+
+## Запуск юнит-тестов
+
+Запуск тестов с подробным отображением запросов и ответов сервера (JSON, заголовки, статус-коды):
+```bash
+python test_service.py -v
 ```
 
 ---

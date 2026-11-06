@@ -4,3 +4,5 @@ TEST_TASK_v2.pdf
 dist/
 build/
 *.spec
+videos.db*
+uploads/

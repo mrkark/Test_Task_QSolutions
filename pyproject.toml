@@ -4,13 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qsolutions-video-recorder"
-version = "1.0.0"
-description = "CSV-driven browser automation and video recorder"
+version = "2.0.0"
+description = "CSV-driven browser automation and video recorder with web service"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "playwright>=1.40.0",
+    "flask>=2.0.0",
+    "requests>=2.25.0",
 ]
 
 [project.scripts]
 capture-video = "capture_video:main"
+web-service = "web_service:main"
