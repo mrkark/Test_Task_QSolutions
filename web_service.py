@@ -67,54 +67,95 @@ def index():
     rows = [dict(row) for row in cursor.fetchall()]
 
     html = """<!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Video Recorder Web Service</title>
+    <title>Video Recorder Web Service Dashboard</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f8fafc; color: #1e293b; margin: 0; padding: 24px; }
-        .container { max-width: 900px; margin: 0 auto; }
-        .card { background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); padding: 24px; margin-bottom: 24px; }
-        h1 { color: #0f172a; margin-top: 0; display: flex; align-items: center; gap: 10px; }
-        .badge { background: #22c55e; color: white; font-size: 12px; padding: 4px 10px; border-radius: 9999px; font-weight: bold; }
-        pre { background: #f1f5f9; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+        h1 { margin: 0; font-size: 24px; display: flex; align-items: center; gap: 12px; }
+        .badge { background: #22c55e; color: #022c22; font-size: 12px; padding: 4px 10px; border-radius: 9999px; font-weight: bold; }
+        .card { background: #1e293b; border-radius: 12px; border: 1px solid #334155; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); }
+        .card h2 { margin-top: 0; font-size: 18px; color: #38bdf8; display: flex; align-items: center; gap: 8px; }
+        .btn-group { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+        .btn { cursor: pointer; background: #3b82f6; color: white; border: none; border-radius: 8px; padding: 8px 16px; font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; transition: background 0.2s, transform 0.1s; }
+        .btn:hover { background: #2563eb; }
+        .btn:active { transform: scale(0.98); }
+        .btn-success { background: #10b981; }
+        .btn-success:hover { background: #059669; }
+        .btn-purple { background: #8b5cf6; }
+        .btn-purple:hover { background: #7c3aed; }
+        .btn-secondary { background: #475569; }
+        .btn-secondary:hover { background: #334155; }
+        .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 6px; }
+        .chip { cursor: pointer; background: #334155; color: #cbd5e1; border: 1px solid #475569; border-radius: 9999px; padding: 4px 12px; font-size: 12px; transition: all 0.2s; }
+        .chip:hover { background: #38bdf8; color: #0f172a; border-color: #38bdf8; font-weight: bold; }
+        .form-row { display: flex; gap: 10px; margin-top: 12px; align-items: center; }
+        input[type="text"], input[type="file"] { background: #0f172a; border: 1px solid #475569; color: white; border-radius: 8px; padding: 8px 12px; font-size: 14px; flex: 1; outline: none; }
+        input[type="text"]:focus { border-color: #38bdf8; }
+        .console { background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; color: #38bdf8; margin-top: 14px; min-height: 50px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
         table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
-        th { background: #f8fafc; color: #64748b; font-weight: 600; }
-        a { color: #2563eb; text-decoration: none; font-weight: 500; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #334155; font-size: 14px; }
+        th { color: #94a3b8; font-weight: 600; }
+        video { max-width: 220px; border-radius: 6px; border: 1px solid #475569; }
+        a { color: #38bdf8; text-decoration: none; }
         a:hover { text-decoration: underline; }
-        video { max-width: 240px; border-radius: 6px; border: 1px solid #cbd5e1; }
-        .endpoint { display: inline-block; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-size: 12px; margin-right: 6px; }
-        .get { background: #dbeafe; color: #1d4ed8; }
-        .post { background: #dcfce7; color: #15803d; }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="card">
-            <h1>Video Recorder Web Service <span class="badge">ONLINE</span></h1>
-            <p>The web service is operational and ready to receive video uploads and queries.</p>
-            <h3>Available Endpoints:</h3>
-            <ul>
-                <li><span class="endpoint post">POST</span> <code>/upload</code> — Upload a video (multipart/form-data: <code>file</code>, <code>company_name</code>)</li>
-                <li><span class="endpoint get">GET</span> <code>/get_video_url?company_name=&lt;name&gt;</code> — Look up video URL by company</li>
-                <li><span class="endpoint get">GET</span> <code>/media/&lt;filename&gt;</code> — Stream uploaded video file</li>
-                <li><span class="endpoint get">GET</span> <a href="/videos"><code>/videos</code></a> — List all records as JSON</li>
-            </ul>
+        <div class="header">
+            <h1>Video Recorder Service <span class="badge">ONLINE</span></h1>
+            <div>
+                <button class="btn btn-secondary" onclick="fetchVideos()">📋 Показать все видео (/videos)</button>
+            </div>
         </div>
 
         <div class="card">
-            <h2>Uploaded Videos ({{ count }})</h2>
+            <h2>🔍 Проверить URL видео по компании (GET /get_video_url)</h2>
+            <p style="color: #94a3b8; font-size: 13px; margin: 0 0 10px 0;">Нажмите на компанию ниже или введите название, затем нажмите кнопку запроса:</p>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
+                <span class="chip" onclick="setCompany('Alpha_Magento_Solutions')">Alpha_Magento_Solutions</span>
+                <span class="chip" onclick="setCompany('Beta_Commerce_Lab')">Beta_Commerce_Lab</span>
+                <span class="chip" onclick="setCompany('Gamma_Web_Services')">Gamma_Web_Services</span>
+            </div>
+            <div class="form-row">
+                <input type="text" id="companyInput" placeholder="Введите название компании (например, Alpha_Magento_Solutions)">
+                <button class="btn" onclick="lookupVideo()">Найти видео</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📤 Загрузить видео вручную (POST /upload)</h2>
+            <form id="uploadForm" onsubmit="handleUpload(event)">
+                <div class="form-row">
+                    <input type="text" id="uploadCompany" placeholder="Название компании" required>
+                    <input type="file" id="uploadFile" accept=".webm,.mp4" required>
+                    <button type="submit" class="btn btn-success">Загрузить видео</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="card" id="consoleCard" style="display: none;">
+            <h2>⚡ Ответ от сервера в реальном времени:</h2>
+            <div class="console" id="consoleOutput">Ожидание действий...</div>
+        </div>
+
+        <div class="card">
+            <h2>📁 Записанные видео в базе данных ({{ count }})</h2>
             {% if rows %}
             <table>
                 <thead>
                     <tr>
                         <th>ID</th>
-                        <th>Company</th>
-                        <th>Video Preview</th>
-                        <th>Video URL</th>
-                        <th>Updated At</th>
+                        <th>Компания</th>
+                        <th>Видео</th>
+                        <th>Действия</th>
+                        <th>Дата</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -125,20 +166,94 @@ def index():
                         <td>
                             <video controls preload="metadata">
                                 <source src="{{ row.video_url }}" type="video/webm">
-                                Your browser does not support webm video.
                             </video>
                         </td>
-                        <td><a href="{{ row.video_url }}" target="_blank">Open Video</a></td>
-                        <td>{{ row.updated_at }}</td>
+                        <td>
+                            <div class="btn-group">
+                                <button class="btn btn-sm btn-purple" onclick="testLookup('{{ row.company_name }}')">API Ссылка</button>
+                                <a class="btn btn-sm btn-secondary" href="{{ row.video_url }}" target="_blank">Открыть напрямую</a>
+                            </div>
+                        </td>
+                        <td style="color: #94a3b8; font-size: 13px;">{{ row.updated_at }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
             {% else %}
-            <p style="color: #64748b;">No videos uploaded yet. Run <code>python capture_video.py --server http://127.0.0.1:8000</code> to record and upload videos.</p>
+            <p style="color: #94a3b8;">Пока нет загруженных видео. Вы можете загрузить видео кнопкой выше или запустить скрипт:<br><code>python capture_video.py --server http://127.0.0.1:8000</code></p>
             {% endif %}
         </div>
     </div>
+
+    <script>
+        function logResponse(text) {
+            const card = document.getElementById('consoleCard');
+            const output = document.getElementById('consoleOutput');
+            card.style.display = 'block';
+            output.textContent = text;
+            card.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function setCompany(name) {
+            document.getElementById('companyInput').value = name;
+            lookupVideo();
+        }
+
+        async function lookupVideo() {
+            const company = document.getElementById('companyInput').value.trim();
+            if (!company) {
+                alert('Пожалуйста, введите или выберите название компании');
+                return;
+            }
+            logResponse(`>>> GET /get_video_url?company_name=${encodeURIComponent(company)}\nОтправка запроса...`);
+            try {
+                const res = await fetch(`/get_video_url?company_name=${encodeURIComponent(company)}`);
+                const json = await res.json();
+                logResponse(`<<< HTTP Статус: ${res.status} ${res.statusText}\n<<< JSON Ответ сервера:\n` + JSON.stringify(json, null, 2));
+            } catch (err) {
+                logResponse(`<<< Ошибка выполнения запроса: ${err}`);
+            }
+        }
+
+        function testLookup(name) {
+            document.getElementById('companyInput').value = name;
+            lookupVideo();
+        }
+
+        async function fetchVideos() {
+            logResponse('>>> GET /videos\nЗапрос списка записей...');
+            try {
+                const res = await fetch('/videos');
+                const json = await res.json();
+                logResponse(`<<< HTTP Статус: ${res.status} ${res.statusText}\n<<< Список всех записей в базе данных:\n` + JSON.stringify(json, null, 2));
+            } catch (err) {
+                logResponse(`<<< Ошибка: ${err}`);
+            }
+        }
+
+        async function handleUpload(e) {
+            e.preventDefault();
+            const company = document.getElementById('uploadCompany').value.trim();
+            const fileInput = document.getElementById('uploadFile');
+            if (!company || fileInput.files.length === 0) return;
+
+            const formData = new FormData();
+            formData.append('company_name', company);
+            formData.append('file', fileInput.files[0]);
+
+            logResponse(`>>> POST /upload (company: ${company}, file: ${fileInput.files[0].name})\nЗагрузка файла...`);
+            try {
+                const res = await fetch('/upload', { method: 'POST', body: formData });
+                const json = await res.json();
+                logResponse(`<<< HTTP Статус: ${res.status} ${res.statusText}\n<<< JSON Ответ сервера:\n` + JSON.stringify(json, null, 2));
+                if (res.ok) {
+                    setTimeout(() => location.reload(), 1500);
+                }
+            } catch (err) {
+                logResponse(`<<< Ошибка загрузки: ${err}`);
+            }
+        }
+    </script>
 </body>
 </html>"""
     from flask import render_template_string
