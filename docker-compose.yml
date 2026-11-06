@@ -1,0 +1,38 @@
+services:
+  web-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: qsolutions-web-service:latest
+    container_name: qsolutions-web-service
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads_data:/app/uploads
+      - db_data:/app/data
+    environment:
+      - FLASK_HOST=0.0.0.0
+      - FLASK_PORT=8000
+      - DATABASE_PATH=/app/data/videos.db
+      - UPLOAD_FOLDER=/app/uploads
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  tests:
+    image: qsolutions-web-service:latest
+    container_name: qsolutions-test-runner
+    depends_on:
+      web-service:
+        condition: service_healthy
+    command: ["python", "test_service.py", "-v"]
+    environment:
+      - PYTHONUNBUFFERED=1
+
+volumes:
+  uploads_data:
+  db_data:

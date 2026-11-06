@@ -4,12 +4,15 @@
 
 ## Быстрый запуск
 
-### Windows
+### Автоматическая настройка через Docker (в 1 клик для заказчика)
+- **`docker_setup.bat`** (Windows) / **`./docker_setup.sh`** (Linux/macOS) — полностью автоматически соберет Docker-контейнеры, запустит веб-сервис на `http://localhost:8000`, выполнит юнит-тесты и выведет список запущенных контейнеров.
+
+### Локальный запуск (Windows)
 - **`quick_start.bat`** — интерактивное меню (запуск веб-сервиса, юнит-тестов, рекордера).
 - **`run_tests.bat`** — запуск 10 юнит-тестов с выводом ответов сервера.
 - **`run.bat`** — запуск рекордера видео.
 
-### Linux / macOS
+### Локальный запуск (Linux / macOS)
 - **`./run_tests.sh`** — запуск юнит-тестов.
 - **`./run.sh`** — запуск рекордера.
 
@@ -79,7 +82,27 @@ found_url = GetVideoURL("http://127.0.0.1:8000", "Alpha_Magento_Solutions")
 
 ## Запуск в Docker
 
+Скрипт автоматической настройки:
 ```bash
-docker build -t qsolutions-video .
-docker run --rm -v ${PWD}/video:/app/video qsolutions-video
+# Windows
+docker_setup.bat
+
+# Linux / macOS
+chmod +x docker_setup.sh
+./docker_setup.sh
+```
+
+Или вручную через docker compose:
+```bash
+# Сборка и запуск веб-сервиса в фоне
+docker compose up -d web-service
+
+# Запуск юнит-тестов внутри Docker
+docker compose run --rm tests
+
+# Просмотр запущенных контейнеров
+docker ps
+
+# Остановка контейнеров
+docker compose down
 ```
