@@ -6,3 +6,5 @@ build/
 *.spec
 videos.db*
 uploads/
+video/*.webm
+!video/Alpha_Magento_Solutions.webm

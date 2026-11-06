@@ -78,14 +78,16 @@ class TestWebService(unittest.TestCase):
 
     def test_02_upload_video_endpoint(self):
         print("\n--- Running: test_02_upload_video_endpoint ---")
+        file_obj = tempfile.SpooledTemporaryFile()
+        file_obj.write(b"\x1a\x45\xdf\xa3 mock webm video bytes")
+        file_obj.seek(0)
         data = {
             "company_name": "ACME GmbH",
-            "file": (tempfile.SpooledTemporaryFile(), "ACME_GmbH.webm"),
+            "file": (file_obj, "ACME_GmbH.webm"),
         }
-        data["file"][0].write(b"\x1a\x45\xdf\xa3 mock webm video bytes")
-        data["file"][0].seek(0)
 
         response = self.client.post("/upload", data=data, content_type="multipart/form-data")
+        file_obj.close()
         self._log_response("POST", "/upload", response)
 
         self.assertEqual(response.status_code, 200)
@@ -119,6 +121,7 @@ class TestWebService(unittest.TestCase):
                 "file": (file_obj, "repeat.webm"),
             }
             resp = self.client.post("/upload", data=data, content_type="multipart/form-data")
+            file_obj.close()
             self._log_response("POST", f"/upload (attempt {i})", resp)
             self.assertEqual(resp.status_code, 200)
             resp.close()
@@ -141,6 +144,7 @@ class TestWebService(unittest.TestCase):
             data={"company_name": "Berlin_Agency", "file": (file_obj, "berlin.webm")},
             content_type="multipart/form-data",
         )
+        file_obj.close()
         up_resp.close()
 
         response = self.client.get("/get_video_url?company_name=Berlin_Agency")
@@ -172,6 +176,7 @@ class TestWebService(unittest.TestCase):
             data={"company_name": "MediaTestCorp", "file": (file_obj, "media_test.webm")},
             content_type="multipart/form-data",
         )
+        file_obj.close()
         self.assertEqual(upload_resp.status_code, 200)
         upload_resp.close()
 
@@ -192,6 +197,7 @@ class TestWebService(unittest.TestCase):
                 data={"company_name": name, "file": (f, f"{name}.webm")},
                 content_type="multipart/form-data",
             )
+            f.close()
             u_resp.close()
 
         response = self.client.get("/videos")
@@ -212,6 +218,7 @@ class TestWebService(unittest.TestCase):
         f.write(b"content")
         f.seek(0)
         resp2 = self.client.post("/upload", data={"file": (f, "test.webm")}, content_type="multipart/form-data")
+        f.close()
         self._log_response("POST", "/upload (missing company_name)", resp2)
         self.assertEqual(resp2.status_code, 400)
         resp2.close()
@@ -238,6 +245,7 @@ class TestWebService(unittest.TestCase):
         print(f"[LIVE CLIENT] GET {uploaded_url} -> Status: {media_resp.status_code}, Bytes: {len(media_resp.content)}")
         self.assertEqual(media_resp.status_code, 200)
         self.assertEqual(media_resp.content, b"live http client webm video bytes 1234567890")
+        media_resp.close()
 
         # Call real GetVideoURL over live HTTP socket
         fetched_url = video_client.GetVideoURL(self.live_server_url, "LiveClientCorp")
