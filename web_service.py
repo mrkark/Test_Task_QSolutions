@@ -67,190 +67,396 @@ def index():
     rows = [dict(row) for row in cursor.fetchall()]
 
     html = """<!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Video Recorder Web Service Dashboard</title>
+    <title>Video Service Dashboard</title>
     <style>
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --surface-hover: #1f242c;
+            --border: #30363d;
+            --text-primary: #f0f6fc;
+            --text-secondary: #8b949e;
+            --btn-bg: #21262d;
+            --btn-border: #363b42;
+            --btn-hover: #30363d;
+            --accent: #238636;
+            --accent-hover: #2ea043;
+            --blue: #1f6feb;
+            --blue-hover: #388bfd;
+        }
+
         * { box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
-        .container { max-width: 1000px; margin: 0 auto; }
-        .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
-        h1 { margin: 0; font-size: 24px; display: flex; align-items: center; gap: 12px; }
-        .badge { background: #22c55e; color: #022c22; font-size: 12px; padding: 4px 10px; border-radius: 9999px; font-weight: bold; }
-        .card { background: #1e293b; border-radius: 12px; border: 1px solid #334155; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); }
-        .card h2 { margin-top: 0; font-size: 18px; color: #38bdf8; display: flex; align-items: center; gap: 8px; }
-        .btn-group { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
-        .btn { cursor: pointer; background: #3b82f6; color: white; border: none; border-radius: 8px; padding: 8px 16px; font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; transition: background 0.2s, transform 0.1s; }
-        .btn:hover { background: #2563eb; }
-        .btn:active { transform: scale(0.98); }
-        .btn-success { background: #10b981; }
-        .btn-success:hover { background: #059669; }
-        .btn-purple { background: #8b5cf6; }
-        .btn-purple:hover { background: #7c3aed; }
-        .btn-secondary { background: #475569; }
-        .btn-secondary:hover { background: #334155; }
-        .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 6px; }
-        .chip { cursor: pointer; background: #334155; color: #cbd5e1; border: 1px solid #475569; border-radius: 9999px; padding: 4px 12px; font-size: 12px; transition: all 0.2s; }
-        .chip:hover { background: #38bdf8; color: #0f172a; border-color: #38bdf8; font-weight: bold; }
-        .form-row { display: flex; gap: 10px; margin-top: 12px; align-items: center; }
-        input[type="text"], input[type="file"] { background: #0f172a; border: 1px solid #475569; color: white; border-radius: 8px; padding: 8px 12px; font-size: 14px; flex: 1; outline: none; }
-        input[type="text"]:focus { border-color: #38bdf8; }
-        .console { background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; color: #38bdf8; margin-top: 14px; min-height: 50px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
-        table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #334155; font-size: 14px; }
-        th { color: #94a3b8; font-weight: 600; }
-        video { max-width: 220px; border-radius: 6px; border: 1px solid #475569; }
-        a { color: #38bdf8; text-decoration: none; }
-        a:hover { text-decoration: underline; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 24px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 16px;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+            margin: 0;
+            letter-spacing: -0.2px;
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background-color: var(--accent);
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .section {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 0 0 12px 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .btn {
+            appearance: none;
+            cursor: pointer;
+            background: var(--btn-bg);
+            border: 1px solid var(--btn-border);
+            color: var(--text-primary);
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            transition: 0.15s cubic-bezier(0.3, 0, 0.5, 1);
+        }
+
+        .btn:hover {
+            background: var(--btn-hover);
+            border-color: #8b949e;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            border-color: rgba(240, 246, 252, 0.1);
+            color: #ffffff;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .btn-blue {
+            background: var(--blue);
+            border-color: rgba(240, 246, 252, 0.1);
+            color: #ffffff;
+        }
+
+        .btn-blue:hover {
+            background: var(--blue-hover);
+        }
+
+        .btn-sm {
+            padding: 3px 8px;
+            font-size: 12px;
+        }
+
+        .tag-btn {
+            cursor: pointer;
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            border-radius: 20px;
+            padding: 3px 10px;
+            font-size: 12px;
+            font-family: ui-monospace, SFMono-Regular, monospace;
+        }
+
+        .tag-btn:hover {
+            border-color: #8b949e;
+            color: var(--text-primary);
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 8px;
+        }
+
+        .upload-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr auto;
+            gap: 8px;
+        }
+
+        input[type="text"], input[type="file"] {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-family: inherit;
+            width: 100%;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #58a6ff;
+            box-shadow: 0 0 0 3px rgba(56, 139, 253, 0.3);
+        }
+
+        .response-panel {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px;
+            font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+            font-size: 12px;
+            color: #c9d1d9;
+            margin-top: 12px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 240px;
+            overflow-y: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            text-align: left;
+            padding: 8px 10px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border);
+            background: rgba(0, 0, 0, 0.1);
+        }
+
+        td {
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+            vertical-align: middle;
+        }
+
+        tr:hover {
+            background: var(--surface-hover);
+        }
+
+        video {
+            width: 180px;
+            height: 100px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            background: #000;
+            display: block;
+        }
+
+        a {
+            color: #58a6ff;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .quick-tags {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }
+
+        .muted {
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>Video Recorder Service <span class="badge">ONLINE</span></h1>
             <div>
-                <button class="btn btn-secondary" onclick="fetchVideos()">📋 Показать все видео (/videos)</button>
+                <h1><span class="status-dot"></span>Video Service</h1>
+                <span class="muted">Internal automation recording and media registry</span>
+            </div>
+            <div>
+                <button class="btn btn-sm" onclick="fetchRecords()">List Records (/videos)</button>
             </div>
         </div>
 
-        <div class="card">
-            <h2>🔍 Проверить URL видео по компании (GET /get_video_url)</h2>
-            <p style="color: #94a3b8; font-size: 13px; margin: 0 0 10px 0;">Нажмите на компанию ниже или введите название, затем нажмите кнопку запроса:</p>
-            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
-                <span class="chip" onclick="setCompany('Alpha_Magento_Solutions')">Alpha_Magento_Solutions</span>
-                <span class="chip" onclick="setCompany('Beta_Commerce_Lab')">Beta_Commerce_Lab</span>
-                <span class="chip" onclick="setCompany('Gamma_Web_Services')">Gamma_Web_Services</span>
+        <div class="section">
+            <div class="section-title">
+                <span>Query Video URL</span>
+                <span class="muted">GET /get_video_url</span>
             </div>
-            <div class="form-row">
-                <input type="text" id="companyInput" placeholder="Введите название компании (например, Alpha_Magento_Solutions)">
-                <button class="btn" onclick="lookupVideo()">Найти видео</button>
+            <div class="quick-tags">
+                <button type="button" class="tag-btn" onclick="selectCompany('Alpha_Magento_Solutions')">Alpha_Magento_Solutions</button>
+                <button type="button" class="tag-btn" onclick="selectCompany('Beta_Commerce_Lab')">Beta_Commerce_Lab</button>
+                <button type="button" class="tag-btn" onclick="selectCompany('Gamma_Web_Services')">Gamma_Web_Services</button>
+            </div>
+            <div class="form-grid">
+                <input type="text" id="queryCompanyInput" placeholder="Enter company name...">
+                <button class="btn btn-blue" onclick="queryVideoURL()">Query</button>
             </div>
         </div>
 
-        <div class="card">
-            <h2>📤 Загрузить видео вручную (POST /upload)</h2>
-            <form id="uploadForm" onsubmit="handleUpload(event)">
-                <div class="form-row">
-                    <input type="text" id="uploadCompany" placeholder="Название компании" required>
-                    <input type="file" id="uploadFile" accept=".webm,.mp4" required>
-                    <button type="submit" class="btn btn-success">Загрузить видео</button>
-                </div>
+        <div class="section">
+            <div class="section-title">
+                <span>Upload Video</span>
+                <span class="muted">POST /upload</span>
+            </div>
+            <form onsubmit="submitUpload(event)" class="upload-grid">
+                <input type="text" id="uploadCompanyInput" placeholder="Company name" required>
+                <input type="file" id="uploadFileInput" accept=".webm,.mp4" required>
+                <button type="submit" class="btn btn-primary">Upload</button>
             </form>
         </div>
 
-        <div class="card" id="consoleCard" style="display: none;">
-            <h2>⚡ Ответ от сервера в реальном времени:</h2>
-            <div class="console" id="consoleOutput">Ожидание действий...</div>
+        <div class="section" id="terminalSection" style="display: none;">
+            <div class="section-title">
+                <span>Server Response</span>
+                <button class="btn btn-sm" onclick="document.getElementById('terminalSection').style.display='none'">Clear</button>
+            </div>
+            <div class="response-panel" id="terminalOutput"></div>
         </div>
 
-        <div class="card">
-            <h2>📁 Записанные видео в базе данных ({{ count }})</h2>
+        <div class="section">
+            <div class="section-title">
+                <span>Stored Records</span>
+                <span class="muted">{{ count }} record(s)</span>
+            </div>
             {% if rows %}
             <table>
                 <thead>
                     <tr>
-                        <th>ID</th>
-                        <th>Компания</th>
-                        <th>Видео</th>
-                        <th>Действия</th>
-                        <th>Дата</th>
+                        <th style="width: 40px;">ID</th>
+                        <th>Company Name</th>
+                        <th style="width: 200px;">Media</th>
+                        <th>Actions</th>
+                        <th style="width: 140px;">Updated</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in rows %}
                     <tr>
-                        <td>{{ row.id }}</td>
-                        <td><strong>{{ row.company_name }}</strong></td>
+                        <td class="muted">{{ row.id }}</td>
+                        <td><code>{{ row.company_name }}</code></td>
                         <td>
                             <video controls preload="metadata">
                                 <source src="{{ row.video_url }}" type="video/webm">
                             </video>
                         </td>
                         <td>
-                            <div class="btn-group">
-                                <button class="btn btn-sm btn-purple" onclick="testLookup('{{ row.company_name }}')">API Ссылка</button>
-                                <a class="btn btn-sm btn-secondary" href="{{ row.video_url }}" target="_blank">Открыть напрямую</a>
+                            <div style="display: flex; gap: 6px;">
+                                <button class="btn btn-sm" onclick="selectCompany('{{ row.company_name }}')">Lookup API</button>
+                                <a class="btn btn-sm" href="{{ row.video_url }}" target="_blank">Direct Link</a>
                             </div>
                         </td>
-                        <td style="color: #94a3b8; font-size: 13px;">{{ row.updated_at }}</td>
+                        <td class="muted">{{ row.updated_at }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
             {% else %}
-            <p style="color: #94a3b8;">Пока нет загруженных видео. Вы можете загрузить видео кнопкой выше или запустить скрипт:<br><code>python capture_video.py --server http://127.0.0.1:8000</code></p>
+            <p class="muted" style="margin: 8px 0;">No records found. Run recorder: <code>python capture_video.py --server http://127.0.0.1:8000</code></p>
             {% endif %}
         </div>
     </div>
 
     <script>
-        function logResponse(text) {
-            const card = document.getElementById('consoleCard');
-            const output = document.getElementById('consoleOutput');
-            card.style.display = 'block';
-            output.textContent = text;
-            card.scrollIntoView({ behavior: 'smooth' });
+        function showResponse(text) {
+            const sec = document.getElementById('terminalSection');
+            const out = document.getElementById('terminalOutput');
+            sec.style.display = 'block';
+            out.textContent = text;
         }
 
-        function setCompany(name) {
-            document.getElementById('companyInput').value = name;
-            lookupVideo();
+        function selectCompany(name) {
+            document.getElementById('queryCompanyInput').value = name;
+            queryVideoURL();
         }
 
-        async function lookupVideo() {
-            const company = document.getElementById('companyInput').value.trim();
-            if (!company) {
-                alert('Пожалуйста, введите или выберите название компании');
-                return;
-            }
-            logResponse(`>>> GET /get_video_url?company_name=${encodeURIComponent(company)}\nОтправка запроса...`);
+        async function queryVideoURL() {
+            const name = document.getElementById('queryCompanyInput').value.trim();
+            if (!name) return;
+            showResponse(`--> GET /get_video_url?company_name=${encodeURIComponent(name)}`);
             try {
-                const res = await fetch(`/get_video_url?company_name=${encodeURIComponent(company)}`);
-                const json = await res.json();
-                logResponse(`<<< HTTP Статус: ${res.status} ${res.statusText}\n<<< JSON Ответ сервера:\n` + JSON.stringify(json, null, 2));
+                const res = await fetch(`/get_video_url?company_name=${encodeURIComponent(name)}`);
+                const data = await res.json();
+                showResponse(`<-- HTTP ${res.status} ${res.statusText}\n` + JSON.stringify(data, null, 2));
             } catch (err) {
-                logResponse(`<<< Ошибка выполнения запроса: ${err}`);
+                showResponse(`<-- Network error: ${err}`);
             }
         }
 
-        function testLookup(name) {
-            document.getElementById('companyInput').value = name;
-            lookupVideo();
-        }
-
-        async function fetchVideos() {
-            logResponse('>>> GET /videos\nЗапрос списка записей...');
+        async function fetchRecords() {
+            showResponse('--> GET /videos');
             try {
                 const res = await fetch('/videos');
-                const json = await res.json();
-                logResponse(`<<< HTTP Статус: ${res.status} ${res.statusText}\n<<< Список всех записей в базе данных:\n` + JSON.stringify(json, null, 2));
+                const data = await res.json();
+                showResponse(`<-- HTTP ${res.status} ${res.statusText}\n` + JSON.stringify(data, null, 2));
             } catch (err) {
-                logResponse(`<<< Ошибка: ${err}`);
+                showResponse(`<-- Network error: ${err}`);
             }
         }
 
-        async function handleUpload(e) {
+        async function submitUpload(e) {
             e.preventDefault();
-            const company = document.getElementById('uploadCompany').value.trim();
-            const fileInput = document.getElementById('uploadFile');
+            const company = document.getElementById('uploadCompanyInput').value.trim();
+            const fileInput = document.getElementById('uploadFileInput');
             if (!company || fileInput.files.length === 0) return;
 
-            const formData = new FormData();
-            formData.append('company_name', company);
-            formData.append('file', fileInput.files[0]);
+            const fd = new FormData();
+            fd.append('company_name', company);
+            fd.append('file', fileInput.files[0]);
 
-            logResponse(`>>> POST /upload (company: ${company}, file: ${fileInput.files[0].name})\nЗагрузка файла...`);
+            showResponse(`--> POST /upload [company=${company}, file=${fileInput.files[0].name}]`);
             try {
-                const res = await fetch('/upload', { method: 'POST', body: formData });
-                const json = await res.json();
-                logResponse(`<<< HTTP Статус: ${res.status} ${res.statusText}\n<<< JSON Ответ сервера:\n` + JSON.stringify(json, null, 2));
+                const res = await fetch('/upload', { method: 'POST', body: fd });
+                const data = await res.json();
+                showResponse(`<-- HTTP ${res.status} ${res.statusText}\n` + JSON.stringify(data, null, 2));
                 if (res.ok) {
-                    setTimeout(() => location.reload(), 1500);
+                    setTimeout(() => location.reload(), 1000);
                 }
             } catch (err) {
-                logResponse(`<<< Ошибка загрузки: ${err}`);
+                showResponse(`<-- Upload failed: ${err}`);
             }
         }
     </script>
