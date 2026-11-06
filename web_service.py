@@ -1,35 +1,73 @@
 import os
 import re
-import sqlite3
+import time
 from datetime import datetime
-from flask import Flask, request, jsonify, send_from_directory, g
+from flask import Flask, request, jsonify, send_from_directory, g, render_template_string
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATABASE_PATH = os.environ.get("DATABASE_PATH", os.path.join(BASE_DIR, "videos.db"))
 UPLOAD_FOLDER = os.environ.get("UPLOAD_FOLDER", os.path.join(BASE_DIR, "uploads"))
+
+DB_HOST = os.environ.get("DB_HOST", "db")
+DB_PORT = int(os.environ.get("DB_PORT", "5432"))
+DB_NAME = os.environ.get("DB_NAME", "videos")
+DB_USER = os.environ.get("DB_USER", "video_user")
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "video_pass")
 
 app = Flask(__name__)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 
+def get_db_connection():
+    return psycopg2.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        cursor_factory=RealDictCursor,
+    )
+
+
+def wait_for_db(max_retries=30, delay=1.0):
+    for attempt in range(1, max_retries + 1):
+        try:
+            conn = psycopg2.connect(
+                host=DB_HOST,
+                port=DB_PORT,
+                dbname=DB_NAME,
+                user=DB_USER,
+                password=DB_PASSWORD,
+                connect_timeout=3,
+            )
+            conn.close()
+            print(f"Connected to PostgreSQL at {DB_HOST}:{DB_PORT}/{DB_NAME}")
+            return True
+        except Exception as exc:
+            print(f"Waiting for database ({attempt}/{max_retries}): {exc}")
+            time.sleep(delay)
+    raise RuntimeError(f"Could not connect to PostgreSQL at {DB_HOST}:{DB_PORT} after {max_retries} attempts.")
+
+
 def init_db():
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-    conn = sqlite3.connect(DATABASE_PATH)
+    wait_for_db()
+    conn = get_db_connection()
     try:
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA busy_timeout=5000;")
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS videos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                company_name TEXT NOT NULL UNIQUE,
-                file_path TEXT NOT NULL,
-                video_url TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-            );
-            """
-        )
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS videos (
+                    id SERIAL PRIMARY KEY,
+                    company_name TEXT NOT NULL UNIQUE,
+                    file_path TEXT NOT NULL,
+                    video_url TEXT NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                );
+                """
+            )
         conn.commit()
     finally:
         conn.close()
@@ -37,10 +75,7 @@ def init_db():
 
 def get_db():
     if "db" not in g:
-        g.db = sqlite3.connect(DATABASE_PATH, timeout=10.0)
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA journal_mode=WAL;")
-        g.db.execute("PRAGMA busy_timeout=5000;")
+        g.db = get_db_connection()
     return g.db
 
 
@@ -64,8 +99,9 @@ def sanitize_filename(company_name: str, original_filename: str = "") -> str:
 @app.route("/", methods=["GET"])
 def index():
     db = get_db()
-    cursor = db.execute("SELECT id, company_name, file_path, video_url, created_at, updated_at FROM videos ORDER BY id DESC")
-    rows = [dict(row) for row in cursor.fetchall()]
+    with db.cursor() as cur:
+        cur.execute("SELECT id, company_name, file_path, video_url, created_at, updated_at FROM videos ORDER BY id DESC")
+        rows = [dict(row) for row in cur.fetchall()]
 
     html = """<!DOCTYPE html>
 <html lang="en">
@@ -314,8 +350,8 @@ def index():
     <div class="container">
         <div class="header">
             <div>
-                <h1><span class="status-dot"></span>Video Service</h1>
-                <span class="muted">Internal automation recording and media registry</span>
+                <h1><span class="status-dot"></span>Video Service (Apache + PostgreSQL)</h1>
+                <span class="muted">Containerized video registry and automation backend</span>
             </div>
             <div>
                 <button class="btn btn-sm" onclick="fetchRecords()">List Records (/videos)</button>
@@ -409,13 +445,13 @@ def index():
                                 <a class="btn btn-sm" href="{{ row.video_url }}" target="_blank">Direct Link</a>
                             </div>
                         </td>
-                        <td class="muted">{{ row.updated_at }}</td>
+                        <td class="muted">{{ row.updated_at.strftime('%Y-%m-%d %H:%M:%S') if row.updated_at and row.updated_at.strftime else row.updated_at }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
             {% else %}
-            <p class="muted" style="margin: 8px 0;">No records found. Run recorder: <code>python capture_video.py --server http://127.0.0.1:8000</code></p>
+            <p class="muted" style="margin: 8px 0;">No records found. Upload a video above or via <code>video_client.py</code>.</p>
             {% endif %}
         </div>
     </div>
@@ -506,7 +542,6 @@ def index():
     </script>
 </body>
 </html>"""
-    from flask import render_template_string
     return render_template_string(html, rows=rows, count=len(rows)), 200
 
 
@@ -536,20 +571,20 @@ def upload_video():
 
     base_url = request.host_url.rstrip("/")
     video_url = f"{base_url}/media/{filename}"
-    now_local = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     db = get_db()
-    db.execute(
-        """
-        INSERT INTO videos (company_name, file_path, video_url, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(company_name) DO UPDATE SET
-            file_path = excluded.file_path,
-            video_url = excluded.video_url,
-            updated_at = excluded.updated_at;
-        """,
-        (company_name, absolute_file_path, video_url, now_local, now_local),
-    )
+    with db.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO videos (company_name, file_path, video_url, created_at, updated_at)
+            VALUES (%s, %s, %s, NOW(), NOW())
+            ON CONFLICT (company_name) DO UPDATE SET
+                file_path = EXCLUDED.file_path,
+                video_url = EXCLUDED.video_url,
+                updated_at = NOW();
+            """,
+            (company_name, absolute_file_path, video_url),
+        )
     db.commit()
 
     return jsonify({"company_name": company_name, "video_url": video_url}), 200
@@ -562,11 +597,12 @@ def get_video_url():
         return jsonify({"error": "company_name query parameter is required"}), 400
 
     db = get_db()
-    cursor = db.execute(
-        "SELECT company_name, video_url FROM videos WHERE company_name = ?",
-        (company_name,),
-    )
-    row = cursor.fetchone()
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT company_name, video_url FROM videos WHERE company_name = %s",
+            (company_name,),
+        )
+        row = cur.fetchone()
 
     if not row:
         return jsonify({"error": f"Company '{company_name}' not found"}), 404
@@ -582,12 +618,27 @@ def serve_media(filename):
 @app.route("/videos", methods=["GET"])
 def list_videos():
     db = get_db()
-    cursor = db.execute("SELECT id, company_name, file_path, video_url, created_at, updated_at FROM videos ORDER BY id ASC")
-    rows = [dict(row) for row in cursor.fetchall()]
+    with db.cursor() as cur:
+        cur.execute("SELECT id, company_name, file_path, video_url, created_at, updated_at FROM videos ORDER BY id ASC")
+        raw_rows = cur.fetchall()
+
+    rows = []
+    for r in raw_rows:
+        item = dict(r)
+        if "created_at" in item and hasattr(item["created_at"], "strftime"):
+            item["created_at"] = item["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+        if "updated_at" in item and hasattr(item["updated_at"], "strftime"):
+            item["updated_at"] = item["updated_at"].strftime("%Y-%m-%d %H:%M:%S")
+        rows.append(item)
+
     return jsonify(rows), 200
 
 
-init_db()
+try:
+    init_db()
+except Exception as init_err:
+    print(f"Notice: init_db deferred or failed on import: {init_err}")
+
 
 def main():
     host = os.environ.get("FLASK_HOST", "0.0.0.0")

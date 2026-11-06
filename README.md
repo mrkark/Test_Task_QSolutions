@@ -1,108 +1,120 @@
-# QSolutions: Browser Automation & Video Web Service
+# QSolutions: Apache + PostgreSQL Web Service in Docker
 
-Проект объединяет автоматизацию браузера с записью видео (Playwright) и веб-сервис для хранения и предпросмотра видео (Flask + SQLite).
+Решение задачи по контейнеризации:
+- **Контейнер `web`**: веб-сервер **Apache 2.4** с модулем **`mod_wsgi`**, обслуживающий сервис на **Flask**.
+- **Контейнер `db`**: база данных **PostgreSQL 16** (заменила SQLite).
+- Управление обоими сервисами через **Docker Compose** с healthcheck и томами данных.
+
+---
 
 ## Быстрый запуск
 
-### Автоматическая настройка через Docker (в 1 клик для заказчика)
-- **`docker_setup.bat`** (Windows) / **`./docker_setup.sh`** (Linux/macOS) — полностью автоматически соберет Docker-контейнеры, запустит веб-сервис на `http://localhost:8000`, выполнит юнит-тесты и выведет список запущенных контейнеров.
+### 1-клик запуск для заказчика (Docker Compose)
+Скрипты полностью автоматически собирают образы, запускают контейнеры, прогоняют тесты и выводят список запущенных контейнеров:
 
-### Локальный запуск (Windows)
-- **`quick_start.bat`** — интерактивное меню (запуск веб-сервиса, юнит-тестов, рекордера).
-- **`run_tests.bat`** — запуск 10 юнит-тестов с выводом ответов сервера.
-- **`run.bat`** — запуск рекордера видео.
+- **Windows**: запустите `docker_setup.bat` (или выберите пункт 5 в `quick_start.bat`).
+- **Linux / macOS**:
+  ```bash
+  chmod +x docker_setup.sh
+  ./docker_setup.sh
+  ```
 
-### Локальный запуск (Linux / macOS)
-- **`./run_tests.sh`** — запуск юнит-тестов.
-- **`./run.sh`** — запуск рекордера.
+### Стандартный запуск через Docker Compose
+```bash
+# Сборка и запуск контейнеров web и db
+docker compose up --build -d
+
+# Просмотр статуса контейнеров
+docker ps
+
+# Просмотр логов Apache
+docker compose logs -f web
+
+# Остановка сервисов
+docker compose down
+```
+
+После старта дашборд доступен по адресу: **`http://localhost:8000`**
 
 ---
 
-## Установка
+## Архитектура контейнеров
 
-Требуется **Python 3.9+**:
+```yaml
+services:
+  web:
+    build: .             # Apache 2.4 + mod_wsgi + Flask
+    ports:
+      - "8000:80"        # Хост 8000 -> Apache порт 80 внутри контейнера
+    volumes:
+      - uploads:/app/uploads
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: videos
+      DB_USER: video_user
+      DB_PASSWORD: video_pass
+    depends_on:
+      db:
+        condition: service_healthy
 
-```bash
-pip install -r requirements.txt
-python -m playwright install chromium
+  db:
+    image: postgres:16   # PostgreSQL 16
+    environment:
+      POSTGRES_DB: videos
+      POSTGRES_USER: video_user
+      POSTGRES_PASSWORD: video_pass
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U video_user -d videos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 ```
+
+- **Хранение данных**: постоянные тома `db_data` (данные PostgreSQL) и `uploads` (видеофайлы) сохраняют все данные между перезапусками контейнеров (`docker compose down` / `up`).
+- **Ожидание готовности БД**: сервис `web` стартует только после прохождения healthcheck базы данных `db`, а также дополнительно проверяет доступность соединения через встроенный retry-цикл `wait_for_db()`.
 
 ---
 
-## Запуск компонентов
+## API эндпоинты
 
-### 1. Веб-сервис (Flask + SQLite)
-```bash
-python web_service.py
-```
-- Доступен по адресу: `http://127.0.0.1:8000` (порт и хост настраиваются через `FLASK_HOST` и `FLASK_PORT`).
-- **Главная страница (`GET /`)**: темный интерфейс разработчика, кнопки быстрого выбора компаний, отдельное окно предпросмотра одного найденного видео (`Video Preview`), форма загрузки и вывод ответов API.
-- **База данных**: SQLite `videos.db` (режим WAL, локальное время).
-
-#### API:
-- `POST /upload` — загрузка видео (`multipart/form-data`: `file`, `company_name`). Возвращает `{"company_name": "...", "video_url": "..."}`.
-- `GET /get_video_url?company_name=<name>` — возвращает URL видео (200) или ошибку 404.
-- `GET /media/<filename>` — раздача видеофайла из папки `uploads/`.
-- `GET /videos` — список всех записей в формате JSON.
-
-### 2. Запись видео (Playwright)
-```bash
-# Локальная запись видео по input.csv:
-python capture_video.py
-
-# Запись с автоматической загрузкой на сервер и превью в браузере:
-python capture_video.py --server http://127.0.0.1:8000 --view-seconds 5
-```
-- Видео сохраняются в папку `./video/` в формате `.webm`.
-- Дополнительный CSV можно передать аргументом: `python capture_video.py custom.csv`.
-
-### 3. Юнит-тесты
-```bash
-python test_service.py -v
-```
-10 тестов проверяют схему БД, загрузку, upsert, 404, отдачу файлов, валидацию, клиентские функции через реальный HTTP-сокет и веб-дашборд. Каждый тест логирует метод, статус-код и JSON-ответ.
+- **`POST /upload`** — загрузка видео (`multipart/form-data`: `file`, `company_name`). Сохраняет видео и выполняет upsert в PostgreSQL:
+  ```json
+  {
+    "company_name": "ACME GmbH",
+    "video_url": "http://127.0.0.1:8000/media/ACME_GmbH.webm"
+  }
+  ```
+- **`GET /get_video_url?company_name=<name>`** — возвращает URL видео (200 OK) или 404, если компания не найдена.
+- **`GET /media/<filename>`** — раздача сохраненного видеофайла из каталога `/app/uploads` (напрямую через Apache Alias и Flask).
+- **`GET /videos`** — возвращает JSON-список всех записей в базе данных.
+- **`GET /`** — веб-интерфейс с темной темой, окном предпросмотра найденного видео (`Video Preview`), быстрыми кнопками выбора и терминалом ответов сервера.
 
 ---
 
-## Клиентские функции (Python)
+## Клиентские функции (Python SDK)
 
-Используются из модуля `video_client.py`:
-
+В файле `video_client.py`:
 ```python
 from video_client import UploadVideo, GetVideoURL
 
 # Загрузка видео
 video_url = UploadVideo("http://127.0.0.1:8000", "video/Alpha_Magento_Solutions.webm", "Alpha_Magento_Solutions")
+print("Uploaded URL:", video_url)
 
-# Получение URL
+# Запрос URL по названию компании
 found_url = GetVideoURL("http://127.0.0.1:8000", "Alpha_Magento_Solutions")
+print("Found URL:", found_url)
 ```
 
 ---
 
-## Запуск в Docker
+## Юнит-тесты
 
-Скрипт автоматической настройки:
+Запуск тестов верификации сервиса:
 ```bash
-# Windows
-docker_setup.bat
-
-# Linux / macOS
-chmod +x docker_setup.sh
-./docker_setup.sh
+python test_service.py -v
 ```
-
-Или вручную через docker compose:
-```bash
-# Сборка и запуск веб-сервиса в фоне
-docker compose up -d web-service
-
-# Запуск юнит-тестов внутри Docker
-docker compose run --rm tests
-
-# Просмотр запущенных контейнеров
-docker ps
-
-# Остановка контейнеров
-docker compose down
-```
+Или в 1 клик через `run_tests.bat`. Все 10 тестов проверяют заголовки Apache, PostgreSQL upsert, валидацию, стриминг видео и клиентские функции со статус-кодами и телами ответов.

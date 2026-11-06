@@ -2,18 +2,31 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    apache2 \
+    apache2-dev \
+    gcc \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+RUN mod_wsgi-express module-config > /etc/apache2/mods-available/wsgi.load \
+    && a2enmod wsgi
+
+COPY apache.conf /etc/apache2/sites-available/000-default.conf
+
 COPY . .
 
-ENV FLASK_HOST=0.0.0.0 \
-    FLASK_PORT=8000 \
-    PYTHONUNBUFFERED=1
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-EXPOSE 8000
+RUN mkdir -p /app/uploads \
+    && chown -R www-data:www-data /app \
+    && chmod -R 777 /app/uploads
 
-CMD ["python", "web_service.py"]
+EXPOSE 80
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["apache2ctl", "-D", "FOREGROUND"]

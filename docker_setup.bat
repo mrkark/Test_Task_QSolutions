@@ -2,7 +2,7 @@
 setlocal
 
 echo ====================================================
-echo  QSolutions Docker Automated Setup ^& Launch
+echo  QSolutions Multi-Container Docker Setup (Apache + PostgreSQL)
 echo ====================================================
 
 where docker >nul 2>nul
@@ -21,43 +21,36 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-echo [1/4] Building Docker container images...
-docker compose build
+echo.
+echo [1/3] Building and starting containers (Apache + PostgreSQL)...
+docker compose up -d --build
 if %ERRORLEVEL% neq 0 (
-    echo [ERROR] Docker build failed!
+    echo [ERROR] Docker compose failed to start!
     pause
     exit /b 1
 )
 
 echo.
-echo [2/4] Starting QSolutions Web Service container...
-docker compose up -d web-service
+echo [2/3] Running automated API and integration tests...
+python test_service.py -v
 if %ERRORLEVEL% neq 0 (
-    echo [ERROR] Failed to start container!
-    pause
-    exit /b 1
+    echo [WARNING] Test execution encountered an issue.
 )
 
 echo.
-echo [3/4] Running automated verification tests inside Docker...
-docker compose run --rm tests
-if %ERRORLEVEL% neq 0 (
-    echo [WARNING] Some tests encountered an issue.
-)
-
-echo.
-echo [4/4] Active Docker Containers:
+echo [3/3] Active Docker Containers:
 echo ====================================================
-docker ps --filter "name=qsolutions-web-service"
+docker ps --filter "name=test_task_qsolutions"
 echo ====================================================
 
 echo.
-echo SUCCESS: All services are configured and running!
+echo SUCCESS: Apache web service and PostgreSQL database are running!
 echo.
 echo - Web Dashboard:  http://localhost:8000
-echo - API Endpoints:  POST /upload, GET /get_video_url, GET /media/
+echo - Web Server:     Apache 2.4 with mod_wsgi
+echo - Database:       PostgreSQL 16 (database: videos, user: video_user)
 echo - View Logs:      docker compose logs -f
-echo - Stop Service:   docker compose down
+echo - Stop Services:  docker compose down
 echo.
 echo Opening Dashboard in browser...
 start http://localhost:8000

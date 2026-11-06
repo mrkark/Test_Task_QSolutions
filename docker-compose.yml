@@ -1,38 +1,34 @@
 services:
-  web-service:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: qsolutions-web-service:latest
-    container_name: qsolutions-web-service
+  web:
+    build: .
     ports:
-      - "8000:8000"
+      - "8000:80"
     volumes:
-      - uploads_data:/app/uploads
-      - db_data:/app/data
+      - uploads:/app/uploads
     environment:
-      - FLASK_HOST=0.0.0.0
-      - FLASK_PORT=8000
-      - DATABASE_PATH=/app/data/videos.db
-      - UPLOAD_FOLDER=/app/uploads
-      - PYTHONUNBUFFERED=1
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
-
-  tests:
-    image: qsolutions-web-service:latest
-    container_name: qsolutions-test-runner
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: videos
+      DB_USER: video_user
+      DB_PASSWORD: video_pass
     depends_on:
-      web-service:
+      db:
         condition: service_healthy
-    command: ["python", "test_service.py", "-v"]
+
+  db:
+    image: postgres:16
     environment:
-      - PYTHONUNBUFFERED=1
+      POSTGRES_DB: videos
+      POSTGRES_USER: video_user
+      POSTGRES_PASSWORD: video_pass
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U video_user -d videos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
-  uploads_data:
   db_data:
+  uploads:
