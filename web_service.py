@@ -60,6 +60,96 @@ def sanitize_filename(company_name: str, original_filename: str = "") -> str:
     return f"{safe_name}{ext}"
 
 
+@app.route("/", methods=["GET"])
+def index():
+    db = get_db()
+    cursor = db.execute("SELECT id, company_name, file_path, video_url, created_at, updated_at FROM videos ORDER BY id DESC")
+    rows = [dict(row) for row in cursor.fetchall()]
+
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Recorder Web Service</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f8fafc; color: #1e293b; margin: 0; padding: 24px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); padding: 24px; margin-bottom: 24px; }
+        h1 { color: #0f172a; margin-top: 0; display: flex; align-items: center; gap: 10px; }
+        .badge { background: #22c55e; color: white; font-size: 12px; padding: 4px 10px; border-radius: 9999px; font-weight: bold; }
+        pre { background: #f1f5f9; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
+        th { background: #f8fafc; color: #64748b; font-weight: 600; }
+        a { color: #2563eb; text-decoration: none; font-weight: 500; }
+        a:hover { text-decoration: underline; }
+        video { max-width: 240px; border-radius: 6px; border: 1px solid #cbd5e1; }
+        .endpoint { display: inline-block; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-size: 12px; margin-right: 6px; }
+        .get { background: #dbeafe; color: #1d4ed8; }
+        .post { background: #dcfce7; color: #15803d; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>Video Recorder Web Service <span class="badge">ONLINE</span></h1>
+            <p>The web service is operational and ready to receive video uploads and queries.</p>
+            <h3>Available Endpoints:</h3>
+            <ul>
+                <li><span class="endpoint post">POST</span> <code>/upload</code> — Upload a video (multipart/form-data: <code>file</code>, <code>company_name</code>)</li>
+                <li><span class="endpoint get">GET</span> <code>/get_video_url?company_name=&lt;name&gt;</code> — Look up video URL by company</li>
+                <li><span class="endpoint get">GET</span> <code>/media/&lt;filename&gt;</code> — Stream uploaded video file</li>
+                <li><span class="endpoint get">GET</span> <a href="/videos"><code>/videos</code></a> — List all records as JSON</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2>Uploaded Videos ({{ count }})</h2>
+            {% if rows %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Company</th>
+                        <th>Video Preview</th>
+                        <th>Video URL</th>
+                        <th>Updated At</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <td>{{ row.id }}</td>
+                        <td><strong>{{ row.company_name }}</strong></td>
+                        <td>
+                            <video controls preload="metadata">
+                                <source src="{{ row.video_url }}" type="video/webm">
+                                Your browser does not support webm video.
+                            </video>
+                        </td>
+                        <td><a href="{{ row.video_url }}" target="_blank">Open Video</a></td>
+                        <td>{{ row.updated_at }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color: #64748b;">No videos uploaded yet. Run <code>python capture_video.py --server http://127.0.0.1:8000</code> to record and upload videos.</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>"""
+    from flask import render_template_string
+    return render_template_string(html, rows=rows, count=len(rows)), 200
+
+
+@app.route("/favicon.ico", methods=["GET"])
+def favicon():
+    return "", 204
+
+
 @app.route("/upload", methods=["POST"])
 def upload_video():
     if "file" not in request.files:
