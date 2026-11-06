@@ -6,6 +6,17 @@ import argparse
 import qscript
 
 
+def start_background_server(port: int = 8000):
+    import threading
+    from werkzeug.serving import make_server
+    import web_service
+
+    server = make_server("127.0.0.1", port, web_service.app)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, f"http://127.0.0.1:{port}"
+
+
 def preview_video(video_url: str, view_seconds: float = 5.0):
     try:
         from playwright.sync_api import sync_playwright
@@ -73,10 +84,23 @@ def main():
     parser = argparse.ArgumentParser(description="CSV-driven browser automation and video recorder with server upload")
     parser.add_argument("csv_file", nargs="?", default="input.csv", help="Path to input CSV file (default: input.csv)")
     parser.add_argument("--server", type=str, default=None, help="Server URL for video upload and preview (e.g. http://127.0.0.1:8000)")
+    parser.add_argument("--auto-server", action="store_true", help="Start local web service in background, upload and preview recorded videos")
     parser.add_argument("--view-seconds", type=float, default=5.0, help="Seconds to preview the video (>0: wait N seconds, 0: wait for Enter)")
 
     args = parser.parse_args()
-    process_csv(csv_filepath=args.csv_file, server_url=args.server, view_seconds=args.view_seconds)
+
+    server_url = args.server
+    server_handle = None
+
+    if args.auto_server:
+        server_handle, server_url = start_background_server(8000)
+        print(f"Background web service started at {server_url}")
+
+    try:
+        process_csv(csv_filepath=args.csv_file, server_url=server_url, view_seconds=args.view_seconds)
+    finally:
+        if server_handle:
+            server_handle.shutdown()
 
 
 if __name__ == "__main__":
