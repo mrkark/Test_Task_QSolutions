@@ -1,6 +1,7 @@
 import os
 import re
 import sqlite3
+from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory, g
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,8 +25,8 @@ def init_db():
                 company_name TEXT NOT NULL UNIQUE,
                 file_path TEXT NOT NULL,
                 video_url TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
             );
             """
         )
@@ -535,18 +536,19 @@ def upload_video():
 
     base_url = request.host_url.rstrip("/")
     video_url = f"{base_url}/media/{filename}"
+    now_local = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     db = get_db()
     db.execute(
         """
         INSERT INTO videos (company_name, file_path, video_url, created_at, updated_at)
-        VALUES (?, ?, ?, datetime('now'), datetime('now'))
+        VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(company_name) DO UPDATE SET
             file_path = excluded.file_path,
             video_url = excluded.video_url,
-            updated_at = datetime('now');
+            updated_at = excluded.updated_at;
         """,
-        (company_name, absolute_file_path, video_url),
+        (company_name, absolute_file_path, video_url, now_local, now_local),
     )
     db.commit()
 
