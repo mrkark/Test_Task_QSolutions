@@ -332,8 +332,27 @@ def index():
                 <button type="button" class="tag-btn" onclick="selectCompany('Gamma_Web_Services')">Gamma_Web_Services</button>
             </div>
             <div class="form-grid">
-                <input type="text" id="queryCompanyInput" placeholder="Enter company name...">
+                <input type="text" id="queryCompanyInput" placeholder="Enter company name..." onkeydown="if(event.key==='Enter') queryVideoURL()">
                 <button class="btn btn-blue" onclick="queryVideoURL()">Query</button>
+            </div>
+        </div>
+
+        <div class="section" id="playerSection" style="display: none; border-color: #388bfd;">
+            <div class="section-title">
+                <span id="playerTitle">Video Preview</span>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <a id="playerDirectLink" class="btn btn-sm" href="#" target="_blank">Open in New Tab</a>
+                    <button class="btn btn-sm" onclick="closePlayer()">Close</button>
+                </div>
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 12px;">
+                <video id="playerVideo" controls playsinline style="width: 100%; max-width: 720px; max-height: 420px; border-radius: 6px; border: 1px solid var(--border); background: #000;">
+                    Your browser does not support HTML5 video.
+                </video>
+                <div style="width: 100%; display: flex; justify-content: space-between; font-size: 12px;" class="muted">
+                    <span id="playerMetaCompany">Company: <code></code></span>
+                    <span id="playerMetaUrl">URL: <code id="playerMetaUrlCode"></code></span>
+                </div>
             </div>
         </div>
 
@@ -413,6 +432,14 @@ def index():
             queryVideoURL();
         }
 
+        function closePlayer() {
+            const playerVid = document.getElementById('playerVideo');
+            playerVid.pause();
+            playerVid.removeAttribute('src');
+            playerVid.load();
+            document.getElementById('playerSection').style.display = 'none';
+        }
+
         async function queryVideoURL() {
             const name = document.getElementById('queryCompanyInput').value.trim();
             if (!name) return;
@@ -421,8 +448,24 @@ def index():
                 const res = await fetch(`/get_video_url?company_name=${encodeURIComponent(name)}`);
                 const data = await res.json();
                 showResponse(`<-- HTTP ${res.status} ${res.statusText}\n` + JSON.stringify(data, null, 2));
+                if (res.ok && data.video_url) {
+                    const playerSec = document.getElementById('playerSection');
+                    const playerVid = document.getElementById('playerVideo');
+                    document.getElementById('playerTitle').textContent = `Video Preview: ${data.company_name}`;
+                    document.getElementById('playerMetaCompany').innerHTML = `Company: <code>${data.company_name}</code>`;
+                    document.getElementById('playerMetaUrlCode').textContent = data.video_url;
+                    document.getElementById('playerDirectLink').href = data.video_url;
+                    playerVid.src = data.video_url;
+                    playerVid.load();
+                    playerSec.style.display = 'block';
+                    playerVid.play().catch(() => {});
+                    playerSec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                } else {
+                    closePlayer();
+                }
             } catch (err) {
                 showResponse(`<-- Network error: ${err}`);
+                closePlayer();
             }
         }
 

@@ -244,6 +244,18 @@ class TestWebService(unittest.TestCase):
         print(f"[LIVE CLIENT] GetVideoURL succeeded -> URL: {fetched_url}")
         self.assertEqual(uploaded_url, fetched_url)
 
+    def test_10_index_dashboard_single_video_player(self):
+        print("\n--- Running: test_10_index_dashboard_single_video_player ---")
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        html_text = response.get_data(as_text=True)
+        self.assertIn('id="playerSection"', html_text)
+        self.assertIn('id="playerVideo"', html_text)
+        self.assertIn('id="queryCompanyInput"', html_text)
+        self.assertIn('closePlayer()', html_text)
+        print("Dashboard contains dedicated single video player element and controls.")
+        response.close()
+
 
 if __name__ == "__main__":
     unittest.main()
