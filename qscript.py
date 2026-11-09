@@ -11,6 +11,7 @@ from playwright.sync_api import sync_playwright, Page
 PATH_TO_VIDEO_FOLDER = "./video"
 
 _CURRENT_PAGE: Optional[Page] = None
+_CURRENT_MOUSE_POS: List[float] = [120.0, 120.0]
 
 INJECTED_VISUALS_SCRIPT = """
 (() => {
@@ -318,15 +319,17 @@ def TriggerZoom(
     x: Optional[float] = None,
     y: Optional[float] = None,
 ) -> Optional[dict]:
-    """Programmatically triggers zoom-in or zoom-out at coordinates (x, y)."""
-    global _CURRENT_PAGE
+    """Programmatically triggers zoom-in or zoom-out at cursor coordinates (x, y)."""
+    global _CURRENT_PAGE, _CURRENT_MOUSE_POS
     target_page = page or _CURRENT_PAGE
     if target_page is None:
         return None
+    target_x = float(x if x is not None else _CURRENT_MOUSE_POS[0])
+    target_y = float(y if y is not None else _CURRENT_MOUSE_POS[1])
     try:
         return target_page.evaluate(
             "({x, y}) => (window.__zoomAt ? window.__zoomAt(x, y) : null)",
-            {"x": x, "y": y},
+            {"x": target_x, "y": target_y},
         )
     except Exception as exc:
         print(f"TriggerZoom error: {exc}", file=sys.stderr)
@@ -341,6 +344,7 @@ def _smooth_mouse_move(
     end_y: float,
     duration: float = 0.8,
 ) -> tuple[float, float]:
+    global _CURRENT_MOUSE_POS
     distance = math.hypot(end_x - start_x, end_y - start_y)
     steps = max(25, int(distance / 12))
     dt = duration / steps
@@ -350,9 +354,13 @@ def _smooth_mouse_move(
         ease = t * t * (3 - 2 * t)
         curr_x = start_x + (end_x - start_x) * ease
         curr_y = start_y + (end_y - start_y) * ease
+        _CURRENT_MOUSE_POS[0] = curr_x
+        _CURRENT_MOUSE_POS[1] = curr_y
         page.mouse.move(curr_x, curr_y)
         time.sleep(dt)
 
+    _CURRENT_MOUSE_POS[0] = end_x
+    _CURRENT_MOUSE_POS[1] = end_y
     return end_x, end_y
 
 
@@ -422,14 +430,18 @@ def CaptureVideo_Magento(
 
         def on_record_zoom_event(ev):
             t = round(max(0.0, time.time() - video_start_time), 2)
+            raw_x = ev.get("x")
+            raw_y = ev.get("y")
+            target_x = float(raw_x) if raw_x is not None else float(_CURRENT_MOUSE_POS[0])
+            target_y = float(raw_y) if raw_y is not None else float(_CURRENT_MOUSE_POS[1])
             event_dict = {
                 "t": t,
-                "x": float(ev.get("x", 640.0)),
-                "y": float(ev.get("y", 360.0)),
+                "x": target_x,
+                "y": target_y,
                 "type": str(ev.get("type", "in")).lower(),
             }
             zoom_events.append(event_dict)
-            print(f"[{company_name}] Captured zoom event: {event_dict}")
+            print(f"[{company_name}] Captured zoom event at cursor ({target_x:.1f}, {target_y:.1f}): {event_dict}")
 
         context.expose_function("__playwright_record_zoom_event", on_record_zoom_event)
         context.add_init_script(INJECTED_VISUALS_SCRIPT)
