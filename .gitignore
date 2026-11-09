@@ -8,3 +8,5 @@ videos.db*
 uploads/
 video/*.webm
 !video/Alpha_Magento_Solutions.webm
+!video/Alpha_Magento_Solutions.zoomed.webm
+!video/*.zoom.json

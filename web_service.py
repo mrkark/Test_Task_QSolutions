@@ -5,6 +5,7 @@ from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory, g, render_template_string
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from apply_zoom import apply_zoom, find_sidecar
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.environ.get("UPLOAD_FOLDER", os.path.join(BASE_DIR, "uploads"))
@@ -63,9 +64,13 @@ def init_db():
                     company_name TEXT NOT NULL UNIQUE,
                     file_path TEXT NOT NULL,
                     video_url TEXT NOT NULL,
+                    processed_video_url TEXT,
+                    sidecar_path TEXT,
                     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
                 );
+                ALTER TABLE videos ADD COLUMN IF NOT EXISTS processed_video_url TEXT;
+                ALTER TABLE videos ADD COLUMN IF NOT EXISTS sidecar_path TEXT;
                 """
             )
         conn.commit()
@@ -96,11 +101,67 @@ def sanitize_filename(company_name: str, original_filename: str = "") -> str:
     return f"{safe_name}{ext}"
 
 
+def process_video_job(video_id: int, base_url: str) -> dict:
+    """Executes zoom post-processing on a stored video and updates PostgreSQL."""
+    db = get_db()
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT id, company_name, file_path, video_url, processed_video_url, sidecar_path FROM videos WHERE id = %s",
+            (video_id,),
+        )
+        row = cur.fetchone()
+
+    if not row:
+        raise ValueError(f"Video with id {video_id} not found")
+
+    file_path = row["file_path"]
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Video file not found at: {file_path}")
+
+    sidecar_path = row["sidecar_path"]
+    if not sidecar_path or not os.path.exists(sidecar_path):
+        sidecar_path = find_sidecar(file_path)
+
+    base, ext = os.path.splitext(file_path)
+    zoomed_filename = f"{os.path.basename(base)}.zoomed{ext or '.webm'}"
+    zoomed_path = os.path.join(UPLOAD_FOLDER, zoomed_filename)
+
+    code, msg = apply_zoom(
+        video_path=file_path,
+        sidecar_path=sidecar_path,
+        output_path=zoomed_path,
+        dry_run=False,
+    )
+    if code != 0:
+        raise RuntimeError(f"apply_zoom failed with exit code {code}: {msg}")
+
+    processed_video_url = f"{base_url}/media/{zoomed_filename}"
+
+    with db.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE videos
+            SET processed_video_url = %s, sidecar_path = %s, updated_at = NOW()
+            WHERE id = %s;
+            """,
+            (processed_video_url, sidecar_path, video_id),
+        )
+    db.commit()
+
+    return {
+        "id": video_id,
+        "company_name": row["company_name"],
+        "status": "completed",
+        "video_url": row["video_url"],
+        "processed_video_url": processed_video_url,
+    }
+
+
 @app.route("/", methods=["GET"])
 def index():
     db = get_db()
     with db.cursor() as cur:
-        cur.execute("SELECT id, company_name, file_path, video_url, created_at, updated_at FROM videos ORDER BY id DESC")
+        cur.execute("SELECT id, company_name, file_path, video_url, processed_video_url, sidecar_path, created_at, updated_at FROM videos ORDER BY id DESC")
         rows = [dict(row) for row in cur.fetchall()]
 
     html = """<!DOCTYPE html>
@@ -124,6 +185,8 @@ def index():
             --accent-hover: #2ea043;
             --blue: #1f6feb;
             --blue-hover: #388bfd;
+            --purple: #8957e5;
+            --purple-hover: #a371f7;
         }
 
         * { box-sizing: border-box; }
@@ -138,7 +201,7 @@ def index():
         }
 
         .container {
-            max-width: 960px;
+            max-width: 1000px;
             margin: 0 auto;
         }
 
@@ -224,6 +287,16 @@ def index():
             background: var(--blue-hover);
         }
 
+        .btn-purple {
+            background: var(--purple);
+            border-color: rgba(240, 246, 252, 0.1);
+            color: #ffffff;
+        }
+
+        .btn-purple:hover {
+            background: var(--purple-hover);
+        }
+
         .btn-sm {
             padding: 3px 8px;
             font-size: 12px;
@@ -245,6 +318,24 @@ def index():
             color: var(--text-primary);
         }
 
+        .badge {
+            display: inline-block;
+            padding: 2px 7px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge-success {
+            background: rgba(35, 134, 54, 0.2);
+            color: #3fb950;
+            border: 1px solid rgba(63, 185, 80, 0.4);
+        }
+        .badge-muted {
+            background: rgba(110, 118, 129, 0.2);
+            color: #8b949e;
+            border: 1px solid rgba(110, 118, 129, 0.4);
+        }
+
         .form-grid {
             display: grid;
             grid-template-columns: 1fr auto;
@@ -253,7 +344,7 @@ def index():
 
         .upload-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr auto;
+            grid-template-columns: 1fr 1fr 1fr auto;
             gap: 8px;
         }
 
@@ -316,8 +407,8 @@ def index():
         }
 
         video {
-            width: 180px;
-            height: 100px;
+            width: 160px;
+            height: 90px;
             border-radius: 4px;
             border: 1px solid var(--border);
             background: #000;
@@ -350,10 +441,10 @@ def index():
     <div class="container">
         <div class="header">
             <div>
-                <h1><span class="status-dot"></span>Video Service (Apache + PostgreSQL)</h1>
-                <span class="muted">Containerized video registry and automation backend</span>
+                <h1><span class="status-dot"></span>Video Service (Apache + PostgreSQL + Zoom Engine)</h1>
+                <span class="muted">Containerized video registry with Camtasia-style FFmpeg zoompan processing</span>
             </div>
-            <div>
+            <div style="display: flex; gap: 8px;">
                 <button class="btn btn-sm" onclick="fetchRecords()">List Records (/videos)</button>
             </div>
         </div>
@@ -378,6 +469,7 @@ def index():
             <div class="section-title">
                 <span id="playerTitle">Video Preview</span>
                 <div style="display: flex; gap: 8px; align-items: center;">
+                    <button id="toggleZoomBtn" class="btn btn-sm btn-purple" style="display: none;" onclick="togglePlayerSource()">Switch to Zoomed</button>
                     <a id="playerDirectLink" class="btn btn-sm" href="#" target="_blank">Open in New Tab</a>
                     <button class="btn btn-sm" onclick="closePlayer()">Close</button>
                 </div>
@@ -395,13 +487,22 @@ def index():
 
         <div class="section">
             <div class="section-title">
-                <span>Upload Video</span>
+                <span>Upload Video & Sidecar</span>
                 <span class="muted">POST /upload</span>
             </div>
             <form onsubmit="submitUpload(event)" class="upload-grid">
                 <input type="text" id="uploadCompanyInput" placeholder="Company name" required>
-                <input type="file" id="uploadFileInput" accept=".webm,.mp4" required>
-                <button type="submit" class="btn btn-primary">Upload</button>
+                <div>
+                    <label class="muted" style="display:block; margin-bottom:2px;">Video File (.webm)</label>
+                    <input type="file" id="uploadFileInput" accept=".webm,.mp4" required>
+                </div>
+                <div>
+                    <label class="muted" style="display:block; margin-bottom:2px;">Sidecar (.zoom.json, optional)</label>
+                    <input type="file" id="uploadSidecarInput" accept=".json">
+                </div>
+                <div style="align-self: flex-end;">
+                    <button type="submit" class="btn btn-primary" style="height: 32px;">Upload</button>
+                </div>
             </form>
         </div>
 
@@ -422,11 +523,12 @@ def index():
             <table>
                 <thead>
                     <tr>
-                        <th style="width: 40px;">ID</th>
+                        <th style="width: 35px;">ID</th>
                         <th>Company Name</th>
-                        <th style="width: 200px;">Media</th>
+                        <th style="width: 170px;">Media</th>
+                        <th>Status</th>
                         <th>Actions</th>
-                        <th style="width: 140px;">Updated</th>
+                        <th style="width: 130px;">Updated</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -436,13 +538,21 @@ def index():
                         <td><code>{{ row.company_name }}</code></td>
                         <td>
                             <video controls preload="metadata">
-                                <source src="{{ row.video_url }}" type="video/webm">
+                                <source src="{{ row.processed_video_url or row.video_url }}" type="video/webm">
                             </video>
                         </td>
                         <td>
-                            <div style="display: flex; gap: 6px;">
-                                <button class="btn btn-sm" onclick="selectCompany('{{ row.company_name }}')">Lookup API</button>
-                                <a class="btn btn-sm" href="{{ row.video_url }}" target="_blank">Direct Link</a>
+                            {% if row.processed_video_url %}
+                                <span class="badge badge-success">Zoomed Ready</span>
+                            {% else %}
+                                <span class="badge badge-muted">Original</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                                <button class="btn btn-sm" onclick="playRecord('{{ row.company_name }}', '{{ row.video_url }}', '{{ row.processed_video_url or '' }}')">Play</button>
+                                <button class="btn btn-sm btn-purple" onclick="triggerProcess({{ row.id }})">Process Zoom</button>
+                                <button class="btn btn-sm" onclick="selectCompany('{{ row.company_name }}')">API</button>
                             </div>
                         </td>
                         <td class="muted">{{ row.updated_at.strftime('%Y-%m-%d %H:%M:%S') if row.updated_at and row.updated_at.strftime else row.updated_at }}</td>
@@ -457,6 +567,10 @@ def index():
     </div>
 
     <script>
+        let currentOrigUrl = '';
+        let currentZoomUrl = '';
+        let isShowingZoomed = false;
+
         function showResponse(text) {
             const sec = document.getElementById('terminalSection');
             const out = document.getElementById('terminalOutput');
@@ -469,12 +583,65 @@ def index():
             queryVideoURL();
         }
 
+        function playRecord(company, origUrl, zoomUrl) {
+            currentOrigUrl = origUrl;
+            currentZoomUrl = zoomUrl;
+            isShowingZoomed = !!zoomUrl;
+            updatePlayerView(company);
+        }
+
+        function updatePlayerView(company) {
+            const playerSec = document.getElementById('playerSection');
+            const playerVid = document.getElementById('playerVideo');
+            const toggleBtn = document.getElementById('toggleZoomBtn');
+            const activeUrl = isShowingZoomed ? currentZoomUrl : currentOrigUrl;
+
+            document.getElementById('playerTitle').textContent = `Video Preview: ${company} (${isShowingZoomed ? 'Zoomed' : 'Original'})`;
+            document.getElementById('playerMetaCompany').innerHTML = `Company: <code>${company}</code>`;
+            document.getElementById('playerMetaUrlCode').textContent = activeUrl;
+            document.getElementById('playerDirectLink').href = activeUrl;
+
+            if (currentOrigUrl && currentZoomUrl) {
+                toggleBtn.style.display = 'inline-block';
+                toggleBtn.textContent = isShowingZoomed ? 'Switch to Original' : 'Switch to Zoomed';
+            } else {
+                toggleBtn.style.display = 'none';
+            }
+
+            playerVid.src = activeUrl;
+            playerVid.load();
+            playerSec.style.display = 'block';
+            playerVid.play().catch(() => {});
+            playerSec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function togglePlayerSource() {
+            if (!currentOrigUrl || !currentZoomUrl) return;
+            isShowingZoomed = !isShowingZoomed;
+            const company = document.getElementById('playerMetaCompany').textContent.replace('Company:', '').trim();
+            updatePlayerView(company);
+        }
+
         function closePlayer() {
             const playerVid = document.getElementById('playerVideo');
             playerVid.pause();
             playerVid.removeAttribute('src');
             playerVid.load();
             document.getElementById('playerSection').style.display = 'none';
+        }
+
+        async function triggerProcess(id) {
+            showResponse(`--> POST /jobs/${id}/process`);
+            try {
+                const res = await fetch(`/jobs/${id}/process`, { method: 'POST' });
+                const data = await res.json();
+                showResponse(`<-- HTTP ${res.status} ${res.statusText}\n` + JSON.stringify(data, null, 2));
+                if (res.ok) {
+                    setTimeout(() => location.reload(), 1500);
+                }
+            } catch (err) {
+                showResponse(`<-- Process error: ${err}`);
+            }
         }
 
         async function queryVideoURL() {
@@ -486,17 +653,7 @@ def index():
                 const data = await res.json();
                 showResponse(`<-- HTTP ${res.status} ${res.statusText}\n` + JSON.stringify(data, null, 2));
                 if (res.ok && data.video_url) {
-                    const playerSec = document.getElementById('playerSection');
-                    const playerVid = document.getElementById('playerVideo');
-                    document.getElementById('playerTitle').textContent = `Video Preview: ${data.company_name}`;
-                    document.getElementById('playerMetaCompany').innerHTML = `Company: <code>${data.company_name}</code>`;
-                    document.getElementById('playerMetaUrlCode').textContent = data.video_url;
-                    document.getElementById('playerDirectLink').href = data.video_url;
-                    playerVid.src = data.video_url;
-                    playerVid.load();
-                    playerSec.style.display = 'block';
-                    playerVid.play().catch(() => {});
-                    playerSec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    playRecord(data.company_name, data.video_url, data.processed_video_url);
                 } else {
                     closePlayer();
                 }
@@ -521,11 +678,15 @@ def index():
             e.preventDefault();
             const company = document.getElementById('uploadCompanyInput').value.trim();
             const fileInput = document.getElementById('uploadFileInput');
+            const sidecarInput = document.getElementById('uploadSidecarInput');
             if (!company || fileInput.files.length === 0) return;
 
             const fd = new FormData();
             fd.append('company_name', company);
             fd.append('file', fileInput.files[0]);
+            if (sidecarInput.files.length > 0) {
+                fd.append('sidecar', sidecarInput.files[0]);
+            }
 
             showResponse(`--> POST /upload [company=${company}, file=${fileInput.files[0].name}]`);
             try {
@@ -533,7 +694,7 @@ def index():
                 const data = await res.json();
                 showResponse(`<-- HTTP ${res.status} ${res.statusText}\n` + JSON.stringify(data, null, 2));
                 if (res.ok) {
-                    setTimeout(() => location.reload(), 1000);
+                    setTimeout(() => location.reload(), 1500);
                 }
             } catch (err) {
                 showResponse(`<-- Upload failed: ${err}`);
@@ -569,6 +730,16 @@ def upload_video():
     absolute_file_path = os.path.abspath(os.path.join(UPLOAD_FOLDER, filename))
     uploaded_file.save(absolute_file_path)
 
+    sidecar_path = None
+    if "sidecar" in request.files:
+        uploaded_sidecar = request.files["sidecar"]
+        if uploaded_sidecar and uploaded_sidecar.filename:
+            sidecar_filename = f"{filename}.zoom.json"
+            sidecar_path = os.path.abspath(os.path.join(UPLOAD_FOLDER, sidecar_filename))
+            uploaded_sidecar.save(sidecar_path)
+
+    auto_process = request.form.get("auto_process", "1").lower() in ("1", "true", "yes")
+
     base_url = request.host_url.rstrip("/")
     video_url = f"{base_url}/media/{filename}"
 
@@ -576,18 +747,86 @@ def upload_video():
     with db.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO videos (company_name, file_path, video_url, created_at, updated_at)
-            VALUES (%s, %s, %s, NOW(), NOW())
+            INSERT INTO videos (company_name, file_path, video_url, sidecar_path, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, NOW(), NOW())
             ON CONFLICT (company_name) DO UPDATE SET
                 file_path = EXCLUDED.file_path,
                 video_url = EXCLUDED.video_url,
-                updated_at = NOW();
+                sidecar_path = COALESCE(EXCLUDED.sidecar_path, videos.sidecar_path),
+                updated_at = NOW()
+            RETURNING id;
             """,
-            (company_name, absolute_file_path, video_url),
+            (company_name, absolute_file_path, video_url, sidecar_path),
         )
+        row = cur.fetchone()
+        video_id = row["id"]
     db.commit()
 
-    return jsonify({"company_name": company_name, "video_url": video_url}), 200
+    processed_video_url = None
+    if auto_process and (sidecar_path or find_sidecar(absolute_file_path)):
+        try:
+            res = process_video_job(video_id, base_url)
+            processed_video_url = res.get("processed_video_url")
+        except Exception as p_err:
+            print(f"Notice: auto-process failed: {p_err}")
+
+    return jsonify({
+        "id": video_id,
+        "company_name": company_name,
+        "video_url": video_url,
+        "processed_video_url": processed_video_url,
+        "sidecar_path": sidecar_path,
+    }), 200
+
+
+@app.route("/jobs/<int:video_id>/process", methods=["POST"])
+def process_job_endpoint(video_id):
+    base_url = request.host_url.rstrip("/")
+    try:
+        if "sidecar" in request.files:
+            sf = request.files["sidecar"]
+            if sf and sf.filename:
+                sc_name = f"{video_id}_{sf.filename}"
+                sc_path = os.path.abspath(os.path.join(UPLOAD_FOLDER, sc_name))
+                sf.save(sc_path)
+                db = get_db()
+                with db.cursor() as cur:
+                    cur.execute("UPDATE videos SET sidecar_path = %s WHERE id = %s", (sc_path, video_id))
+                db.commit()
+
+        result = process_video_job(video_id, base_url)
+        return jsonify(result), 200
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 404
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/process", methods=["POST"])
+def process_general_endpoint():
+    base_url = request.host_url.rstrip("/")
+    video_id = request.form.get("video_id") or (request.json.get("video_id") if request.is_json else None)
+    company_name = request.form.get("company_name") or (request.json.get("company_name") if request.is_json else None)
+
+    db = get_db()
+    with db.cursor() as cur:
+        if video_id:
+            cur.execute("SELECT id FROM videos WHERE id = %s", (int(video_id),))
+        elif company_name:
+            cur.execute("SELECT id FROM videos WHERE company_name = %s", (company_name.strip(),))
+        else:
+            return jsonify({"error": "Either video_id or company_name must be provided"}), 400
+        row = cur.fetchone()
+
+    if not row:
+        return jsonify({"error": "Video record not found"}), 404
+
+    target_id = row["id"]
+    try:
+        result = process_video_job(target_id, base_url)
+        return jsonify(result), 200
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/get_video_url", methods=["GET"])
@@ -599,7 +838,7 @@ def get_video_url():
     db = get_db()
     with db.cursor() as cur:
         cur.execute(
-            "SELECT company_name, video_url FROM videos WHERE company_name = %s",
+            "SELECT id, company_name, video_url, processed_video_url FROM videos WHERE company_name = %s",
             (company_name,),
         )
         row = cur.fetchone()
@@ -607,7 +846,12 @@ def get_video_url():
     if not row:
         return jsonify({"error": f"Company '{company_name}' not found"}), 404
 
-    return jsonify({"company_name": row["company_name"], "video_url": row["video_url"]}), 200
+    return jsonify({
+        "id": row["id"],
+        "company_name": row["company_name"],
+        "video_url": row["video_url"],
+        "processed_video_url": row["processed_video_url"],
+    }), 200
 
 
 @app.route("/media/<path:filename>", methods=["GET"])
@@ -619,7 +863,7 @@ def serve_media(filename):
 def list_videos():
     db = get_db()
     with db.cursor() as cur:
-        cur.execute("SELECT id, company_name, file_path, video_url, created_at, updated_at FROM videos ORDER BY id ASC")
+        cur.execute("SELECT id, company_name, file_path, video_url, processed_video_url, sidecar_path, created_at, updated_at FROM videos ORDER BY id ASC")
         raw_rows = cur.fetchall()
 
     rows = []

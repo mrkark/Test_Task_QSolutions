@@ -180,6 +180,87 @@ class TestWebService(unittest.TestCase):
         print("Dashboard contains dedicated single video player element and controls.")
         resp.close()
 
+    def test_11_upload_with_sidecar_and_auto_process(self):
+        print("\n--- Running: test_11_upload_with_sidecar_and_auto_process ---")
+        sidecar_data = {
+            "viewport": {"width": 1280, "height": 720},
+            "fps": 25,
+            "zoom_factor": 2.0,
+            "ramp_sec": 0.5,
+            "events": [
+                {"t": 1.0, "x": 640, "y": 360, "type": "in"},
+                {"t": 3.0, "x": 640, "y": 360, "type": "out"},
+            ],
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as vid_tmp:
+            vid_tmp.write(b"mock video bytes for sidecar test")
+            vid_path = vid_tmp.name
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as sc_tmp:
+            sc_tmp.write(json.dumps(sidecar_data).encode("utf-8"))
+            sc_path = sc_tmp.name
+
+        try:
+            with open(vid_path, "rb") as vf, open(sc_path, "rb") as sf:
+                resp = requests.post(
+                    f"{SERVER_URL}/upload",
+                    data={"company_name": "SidecarZoomCorp", "auto_process": "1"},
+                    files={
+                        "file": ("SidecarZoomCorp.webm", vf, "video/webm"),
+                        "sidecar": ("SidecarZoomCorp.webm.zoom.json", sf, "application/json"),
+                    },
+                )
+            self._log_response("POST", "/upload (with sidecar)", resp)
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertEqual(data["company_name"], "SidecarZoomCorp")
+            self.assertIn("video_url", data)
+            self.assertIn("id", data)
+            resp.close()
+        finally:
+            if os.path.exists(vid_path):
+                os.remove(vid_path)
+            if os.path.exists(sc_path):
+                os.remove(sc_path)
+
+    def test_12_jobs_process_endpoint(self):
+        print("\n--- Running: test_12_jobs_process_endpoint ---")
+        # First query video ID for SidecarZoomCorp or ACME_Postgres_GmbH
+        list_resp = requests.get(f"{SERVER_URL}/videos")
+        records = list_resp.json()
+        target = next((r for r in records if r["company_name"] == "SidecarZoomCorp"), records[0])
+        list_resp.close()
+
+        video_id = target["id"]
+        resp = requests.post(f"{SERVER_URL}/jobs/{video_id}/process")
+        self._log_response("POST", f"/jobs/{video_id}/process", resp)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["status"], "completed")
+        self.assertIn("processed_video_url", data)
+        self.assertTrue(data["processed_video_url"].endswith(".zoomed.webm"))
+        resp.close()
+
+    def test_13_get_video_url_includes_processed_url(self):
+        print("\n--- Running: test_13_get_video_url_includes_processed_url ---")
+        resp = requests.get(f"{SERVER_URL}/get_video_url", params={"company_name": "SidecarZoomCorp"})
+        self._log_response("GET", "/get_video_url?company_name=SidecarZoomCorp", resp)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["company_name"], "SidecarZoomCorp")
+        self.assertIn("video_url", data)
+        self.assertIn("processed_video_url", data)
+        self.assertIsNotNone(data["processed_video_url"])
+        resp.close()
+
+    def test_14_process_video_client_function(self):
+        print("\n--- Running: test_14_process_video_client_function ---")
+        processed_url = video_client.ProcessVideo(SERVER_URL, "SidecarZoomCorp")
+        print(f"[LIVE CLIENT] ProcessVideo returned: {processed_url}")
+        self.assertIsNotNone(processed_url)
+        self.assertTrue(processed_url.endswith(".zoomed.webm"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,6 +12,16 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
+echo [1/2] Running Zoom Logic Tests (pytest)...
+pytest test_zoom.py -v
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] Zoom logic tests failed!
+    pause
+    exit /b %ERRORLEVEL%
+)
+
+echo.
+echo [2/2] Running Web Service Integration Tests...
 python test_service.py -v
 
 echo.

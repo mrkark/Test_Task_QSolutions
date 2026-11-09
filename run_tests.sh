@@ -10,6 +10,11 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
+echo "[1/2] Running Zoom Logic Tests (pytest)..."
+pytest test_zoom.py -v
+
+echo ""
+echo "[2/2] Running Web Service Integration Tests..."
 python3 test_service.py -v
 
 echo "===================================================="

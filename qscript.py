@@ -3,8 +3,9 @@ import re
 import sys
 import time
 import math
+import json
 import random
-from typing import Optional
+from typing import Optional, Dict, Any, List
 from playwright.sync_api import sync_playwright, Page
 
 PATH_TO_VIDEO_FOLDER = "./video"
@@ -111,7 +112,13 @@ INJECTED_VISUALS_SCRIPT = """
         const cursor = document.getElementById('__playwright_cursor_arrow__');
         const callout = document.getElementById('__playwright_callout__');
 
+        let lastMouseX = 640;
+        let lastMouseY = 360;
+        let isZoomedIn = false;
+
         function updatePosition(x, y) {
+            lastMouseX = x;
+            lastMouseY = y;
             if (highlight && cursor) {
                 highlight.style.transform = `translate(${x}px, ${y}px)`;
                 cursor.style.transform = `translate(${x}px, ${y}px)`;
@@ -157,6 +164,75 @@ INJECTED_VISUALS_SCRIPT = """
         window.addEventListener('mousedown', (e) => {
             createRipple(e.clientX, e.clientY);
         }, { capture: true, passive: true });
+
+        function showZoomIndicator(x, y, type) {
+            let ind = document.getElementById('__playwright_zoom_indicator__');
+            if (!ind) {
+                ind = document.createElement('div');
+                ind.id = '__playwright_zoom_indicator__';
+                container.appendChild(ind);
+            }
+            const isZoomIn = (type === 'in');
+            const ringBorder = isZoomIn ? '4px solid #00e676' : '4px dashed #ff3d00';
+            const bg = isZoomIn ? 'rgba(0, 230, 118, 0.25)' : 'rgba(255, 61, 0, 0.2)';
+            const shadow = isZoomIn ? '0 0 24px rgba(0, 230, 118, 0.85)' : '0 0 24px rgba(255, 61, 0, 0.85)';
+
+            ind.style.cssText = `
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 80px;
+                height: 80px;
+                margin-left: -40px;
+                margin-top: -40px;
+                border-radius: 50%;
+                border: ${ringBorder};
+                background: ${bg};
+                box-shadow: ${shadow};
+                pointer-events: none;
+                z-index: 2147483647;
+                transform: translate(${x}px, ${y}px) scale(${isZoomIn ? 0.2 : 1.8});
+                opacity: 0.95;
+                transition: transform 0.6s cubic-bezier(0.1, 0.8, 0.3, 1), opacity 0.6s ease-out;
+            `;
+
+            requestAnimationFrame(() => {
+                ind.style.transform = `translate(${x}px, ${y}px) scale(${isZoomIn ? 1.6 : 0.3})`;
+                ind.style.opacity = '0';
+            });
+        }
+
+        function toggleZoom(x, y) {
+            isZoomedIn = !isZoomedIn;
+            const evType = isZoomedIn ? 'in' : 'out';
+            showZoomIndicator(x, y, evType);
+            const ev = {
+                x: Math.round(x),
+                y: Math.round(y),
+                type: evType
+            };
+            if (window.__playwright_record_zoom_event) {
+                try {
+                    window.__playwright_record_zoom_event(ev);
+                } catch(e) {}
+            }
+            return ev;
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'F5' || e.code === 'F5') {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleZoom(lastMouseX, lastMouseY);
+            }
+        }, { capture: true });
+
+        window.__zoomAt = function(x, y) {
+            const targetX = (typeof x === 'number') ? x : lastMouseX;
+            const targetY = (typeof y === 'number') ? y : lastMouseY;
+            updatePosition(targetX, targetY);
+            return toggleZoom(targetX, targetY);
+        };
 
         window.__showCallout = function(text, bgColor, textColor, fade) {
             if (!callout) return;
@@ -237,6 +313,26 @@ def ShowCallout(
         pass
 
 
+def TriggerZoom(
+    page: Optional[Page] = None,
+    x: Optional[float] = None,
+    y: Optional[float] = None,
+) -> Optional[dict]:
+    """Programmatically triggers zoom-in or zoom-out at coordinates (x, y)."""
+    global _CURRENT_PAGE
+    target_page = page or _CURRENT_PAGE
+    if target_page is None:
+        return None
+    try:
+        return target_page.evaluate(
+            "({x, y}) => (window.__zoomAt ? window.__zoomAt(x, y) : null)",
+            {"x": x, "y": y},
+        )
+    except Exception as exc:
+        print(f"TriggerZoom error: {exc}", file=sys.stderr)
+        return None
+
+
 def _smooth_mouse_move(
     page: Page,
     start_x: float,
@@ -283,6 +379,7 @@ def CaptureVideo_Magento(
     city: str,
     street: str,
     house_no: str,
+    enable_zoom: bool = False,
 ) -> Optional[str]:
     global _CURRENT_PAGE
 
@@ -290,10 +387,13 @@ def CaptureVideo_Magento(
     os.makedirs(target_dir, exist_ok=True)
 
     headless_env = os.environ.get("HEADLESS", "0").lower() in ("1", "true", "yes")
+    if not enable_zoom and os.environ.get("ENABLE_ZOOM", "0").lower() in ("1", "true", "yes"):
+        enable_zoom = True
 
     playwright_instance = None
     browser = None
     context = None
+    zoom_events: List[Dict[str, Any]] = []
 
     try:
         playwright_instance = sync_playwright().start()
@@ -318,6 +418,20 @@ def CaptureVideo_Magento(
             locale=language or "en-US",
         )
 
+        video_start_time = time.time()
+
+        def on_record_zoom_event(ev):
+            t = round(max(0.0, time.time() - video_start_time), 2)
+            event_dict = {
+                "t": t,
+                "x": float(ev.get("x", 640.0)),
+                "y": float(ev.get("y", 360.0)),
+                "type": str(ev.get("type", "in")).lower(),
+            }
+            zoom_events.append(event_dict)
+            print(f"[{company_name}] Captured zoom event: {event_dict}")
+
+        context.expose_function("__playwright_record_zoom_event", on_record_zoom_event)
         context.add_init_script(INJECTED_VISUALS_SCRIPT)
 
         page = context.new_page()
@@ -424,6 +538,14 @@ def CaptureVideo_Magento(
         cur_x, cur_y = _smooth_mouse_move(page, cur_x, cur_y, res_x, res_y, duration=0.85)
         time.sleep(0.3)
 
+        if enable_zoom:
+            print(f"[{company_name}] Scenario triggering programmatic window.__zoomAt({res_x:.1f}, {res_y:.1f}) (in)...")
+            TriggerZoom(page, res_x, res_y)
+            time.sleep(2.0)
+            print(f"[{company_name}] Scenario triggering programmatic window.__zoomAt({res_x:.1f}, {res_y:.1f}) (out)...")
+            TriggerZoom(page, res_x, res_y)
+            time.sleep(0.5)
+
         print(f"[{company_name}] Clicking first result...")
         try:
             page.mouse.click(cur_x, cur_y)
@@ -453,6 +575,19 @@ def CaptureVideo_Magento(
 
         os.replace(raw_video_path, final_video_path)
         abs_final_path = os.path.abspath(final_video_path)
+
+        if len(zoom_events) > 0:
+            sidecar_path = f"{abs_final_path}.zoom.json"
+            sidecar_data = {
+                "viewport": {"width": 1280, "height": 720},
+                "fps": 25,
+                "zoom_factor": 2.0,
+                "ramp_sec": 0.5,
+                "events": zoom_events,
+            }
+            with open(sidecar_path, "w", encoding="utf-8") as sf:
+                json.dump(sidecar_data, sf, indent=2)
+            print(f"[{company_name}] Sidecar written with {len(zoom_events)} events: {sidecar_path}")
 
         print(f"[{company_name}] Success: Video recorded at {abs_final_path}")
         return abs_final_path

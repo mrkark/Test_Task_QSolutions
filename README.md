@@ -1,20 +1,31 @@
-# QSolutions: Apache + PostgreSQL Web Service in Docker
+# QSolutions: Apache + PostgreSQL Web Service with Camtasia Zoom in Docker
 
-Веб-сервис для хранения и предпросмотра видео в двух изолированных Docker-контейнерах:
-- **`web`**: Apache 2.4 + `mod_wsgi` + Flask (порт 80 внутри контейнера -> 8000 на хосте).
+Веб-сервис для автоматизации записи, хранения, зумирования (Camtasia-style zoom effect) и предпросмотра видео в изолированных Docker-контейнерах:
+- **`web`**: Apache 2.4 + `mod_wsgi` + Flask + FFmpeg (порт 80 внутри контейнера -> 8000 на хосте).
 - **`db`**: PostgreSQL 16 (данные сохраняются в Docker-томе `db_data`).
 
 ---
 
-## Файлы конфигурации и запуска Docker в репозитории
+## Архитектура эффекта зумирования (Camtasia-style Zoom)
 
-- **`docker-compose.yml`** — конфигурация сервисов `web` и `db`, томов `db_data` и `uploads`, переменных окружения и healthcheck.
-- **`Dockerfile`** — сборка образа веб-сервера (Debian, Apache 2.4, Python 3.11, `mod_wsgi`).
-- **`apache.conf`** — конфигурация Apache VirtualHost, mod_wsgi демон-процесса и псевдонима `/media`.
-- **`app.wsgi`** — точка входа WSGI для Flask-приложения.
-- **`entrypoint.sh`** — скрипт инициализации прав директории `/app/uploads`.
-- **`docker_setup.bat`** — скрипт автоматической настройки и запуска в 1 клик для Windows.
-- **`docker_setup.sh`** — скрипт автоматической настройки и запуска для Linux / macOS.
+1. **Захват событий зума при записи (`qscript.py`)**:
+   - Горячая клавиша **F5**: первое нажатие включает приближение в текущей точке курсора мыши, второе — отдаление.
+   - Программный хук **`window.__zoomAt(x, y)`**: позволяет сценарию автоматизации управлять приближением/отдалением без нажатия F5.
+   - Визуальный индикатор (анимированное цветное кольцо на экране) показывает оператору статус зума.
+   - События сохраняются в sidecar JSON файл `<video>.zoom.json` только при наличии хотя бы одного события.
+
+2. **Постобработка видео (`apply_zoom.py` + FFmpeg)**:
+   - Применяет фильтр `zoompan` с плавным сглаживанием (smoothstep easing: zoom-in -> hold -> zoom-out).
+   - Точное центрирование по координатам мыши с ограничением по границам кадра (`clamp`).
+   - Поддержка нескольких непересекающихся пар in/out и открытого зума (open-ended zoom — удержание до конца видео).
+   - При отсутствии событий выполняется путь «copy unchanged» без перекодирования.
+   - Флаги `--dry-run` (вывод команды FFmpeg без запуска) и `--ffmpeg <path>` (указание кастомного бинарника).
+
+3. **Интеграция в Docker-сервис**:
+   - `ffmpeg` установлен в образ веб-сервера (`Dockerfile`).
+   - Эндпоинт `POST /jobs/<id>/process` (и `POST /process`) запускает зумирование сохраненного видео.
+   - URL обработанного видео сохраняется в PostgreSQL в колонке `processed_video_url`.
+   - Веб-дашборд (`http://localhost:8000`) позволяет переключаться между оригинальным и зумированным видео в плеере.
 
 ---
 
@@ -34,7 +45,7 @@
 docker compose up --build -d
 
 # Статус контейнеров
-docker ps
+docker compose ps
 
 # Остановка контейнеров
 docker compose down
@@ -44,20 +55,41 @@ docker compose down
 
 ---
 
-## API эндпоинты
+## Команды постобработки (CLI)
 
-- **`POST /upload`** — загрузка видео (`multipart/form-data`: `file`, `company_name`). Сохраняет файл и делает upsert в PostgreSQL.
-- **`GET /get_video_url?company_name=<name>`** — возвращает URL видео (200) или ошибку 404.
-- **`GET /media/<filename>`** — раздача видеофайла из хранилища.
-- **`GET /videos`** — список всех сохраненных записей в JSON.
-- **`GET /`** — темный веб-интерфейс с отдельным окном предпросмотра найденного видео (`Video Preview`).
+```bash
+# Обработка видео с автоматическим поиском sidecar JSON
+python apply_zoom.py --video video/Alpha_Magento_Solutions.webm
+
+# Превью команды FFmpeg без выполнения кодирования
+python apply_zoom.py --video video/Alpha_Magento_Solutions.webm --dry-run
+```
 
 ---
 
-## Юнит-тесты
+## API эндпоинты
 
-Для проверки запущенного сервиса:
+- **`POST /upload`** — загрузка видео и опционального sidecar (`multipart/form-data`: `file`, `company_name`, `sidecar`).
+- **`POST /jobs/<id>/process`** — запуск зумирования видео по его ID через FFmpeg.
+- **`POST /process`** — универсальный эндпоинт обработки (по `video_id` или `company_name`).
+- **`GET /get_video_url?company_name=<name>`** — возвращает оригинальный `video_url` и `processed_video_url`.
+- **`GET /media/<filename>`** — раздача видеофайлов из хранилища (через Apache Alias с поддержкой Range).
+- **`GET /videos`** — список всех записей из базы данных PostgreSQL.
+- **`GET /`** — веб-интерфейс с плеером (переключение Original / Zoomed) и кнопками запуска обработки.
+
+---
+
+## Тестирование
+
+Запуск всех тестов проекта:
+- **Windows**: `run_tests.bat`
+- **Linux / macOS**: `./run_tests.sh`
+
+Либо вручную:
 ```bash
+# 1. Тесты логики зума, парсинга sidecar и математики фильтров (pytest)
+pytest test_zoom.py -v
+
+# 2. Интеграционные тесты веб-сервиса и API
 python test_service.py -v
 ```
-Или двойным кликом по `run_tests.bat`. Все 10 тестов проверяют заголовки Apache, PostgreSQL upsert, валидацию и клиентские функции со статус-кодами и телами ответов.
