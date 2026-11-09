@@ -193,8 +193,15 @@ class TestWebService(unittest.TestCase):
             ],
         }
 
+        real_video_path = os.path.join("video", "Alpha_Magento_Solutions.webm")
+        if os.path.exists(real_video_path):
+            with open(real_video_path, "rb") as rf:
+                valid_video_bytes = rf.read()
+        else:
+            valid_video_bytes = b"\x1a\x45\xdf\xa3"
+
         with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as vid_tmp:
-            vid_tmp.write(b"mock video bytes for sidecar test")
+            vid_tmp.write(valid_video_bytes)
             vid_path = vid_tmp.name
 
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as sc_tmp:
