@@ -477,10 +477,20 @@ def CaptureVideo_Magento(
         page.mouse.click(cur_x, cur_y)
         time.sleep(0.3)
 
+        if enable_zoom:
+            print(f"[{company_name}] Scenario triggering programmatic window.__zoomAt({cur_x:.1f}, {cur_y:.1f}) (in)...")
+            TriggerZoom(page, cur_x, cur_y)
+            time.sleep(0.6)
+
         search_query = f"Magento developer in {city}"
         print(f"[{company_name}] Typing query: '{search_query}'...")
         _human_type(page, search_query)
         time.sleep(0.6)
+
+        if enable_zoom:
+            print(f"[{company_name}] Scenario triggering programmatic window.__zoomAt({cur_x:.1f}, {cur_y:.1f}) (out)...")
+            TriggerZoom(page, cur_x, cur_y)
+            time.sleep(0.6)
 
         submit_btn = None
         btns = page.locator('form button[type="submit"]')
@@ -548,15 +558,7 @@ def CaptureVideo_Magento(
 
         print(f"[{company_name}] Moving cursor smoothly to first result ({res_x:.1f}, {res_y:.1f})...")
         cur_x, cur_y = _smooth_mouse_move(page, cur_x, cur_y, res_x, res_y, duration=0.85)
-        time.sleep(0.3)
-
-        if enable_zoom:
-            print(f"[{company_name}] Scenario triggering programmatic window.__zoomAt({res_x:.1f}, {res_y:.1f}) (in)...")
-            TriggerZoom(page, res_x, res_y)
-            time.sleep(2.0)
-            print(f"[{company_name}] Scenario triggering programmatic window.__zoomAt({res_x:.1f}, {res_y:.1f}) (out)...")
-            TriggerZoom(page, res_x, res_y)
-            time.sleep(0.5)
+        time.sleep(0.5)
 
         print(f"[{company_name}] Clicking first result...")
         try:

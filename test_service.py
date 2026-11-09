@@ -188,8 +188,8 @@ class TestWebService(unittest.TestCase):
             "zoom_factor": 2.0,
             "ramp_sec": 0.5,
             "events": [
-                {"t": 1.0, "x": 640, "y": 360, "type": "in"},
-                {"t": 3.0, "x": 640, "y": 360, "type": "out"},
+                {"t": 1.0, "x": 540.0, "y": 270.0, "type": "in"},
+                {"t": 3.0, "x": 540.0, "y": 270.0, "type": "out"},
             ],
         }
 
