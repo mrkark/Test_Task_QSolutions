@@ -269,6 +269,7 @@ INJECTED_VISUALS_SCRIPT = """
             }
 
             const ev = {
+                wall_time: Date.now() / 1000.0,
                 x: Math.round(x),
                 y: Math.round(y),
                 type: evType
@@ -488,29 +489,34 @@ def CaptureVideo_Magento(
             locale=language or "en-US",
         )
 
-        session_start_time = time.time()
+        session_start_epoch = time.time()
         raw_zoom_events: List[Dict[str, Any]] = []
 
         def on_record_zoom_event(ev):
-            t_wall = time.time()
+            raw_wall = ev.get("wall_time")
+            if raw_wall is not None:
+                t = round(max(0.0, float(raw_wall) - session_start_epoch), 2)
+            else:
+                t = round(max(0.0, time.time() - session_start_epoch), 2)
             raw_x = ev.get("x")
             raw_y = ev.get("y")
             target_x = float(raw_x) if raw_x is not None else float(_CURRENT_MOUSE_POS[0])
             target_y = float(raw_y) if raw_y is not None else float(_CURRENT_MOUSE_POS[1])
             event_dict = {
-                "t_wall": t_wall,
+                "t": t,
                 "x": target_x,
                 "y": target_y,
                 "type": str(ev.get("type", "in")).lower(),
             }
             raw_zoom_events.append(event_dict)
-            print(f"[{company_name}] Captured zoom event at cursor ({target_x:.1f}, {target_y:.1f}): {event_dict}")
+            print(f"[{company_name}] Captured zoom event at cursor ({target_x:.1f}, {target_y:.1f}) at t={t}s")
 
         context.expose_function("__playwright_record_zoom_event", on_record_zoom_event)
         context.add_init_script(INJECTED_VISUALS_SCRIPT)
 
         page = context.new_page()
         _CURRENT_PAGE = page
+        session_start_epoch = time.time()
 
         print(f"[{company_name}] Opening {url}...")
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -661,17 +667,12 @@ def CaptureVideo_Magento(
 
         zoom_events: List[Dict[str, Any]] = []
         if len(raw_zoom_events) > 0:
-            if real_video_duration > 0 and total_wall_time > real_video_duration:
-                pts_zero_wall = session_end_time - real_video_duration
-            else:
-                pts_zero_wall = session_start_time
-
             for ev in raw_zoom_events:
-                t_cal = round(max(0.0, ev["t_wall"] - pts_zero_wall), 2)
-                if real_video_duration > 0:
-                    t_cal = min(round(real_video_duration - 0.05, 2), t_cal)
+                t_val = ev["t"]
+                if real_video_duration > 0 and t_val >= real_video_duration:
+                    t_val = round(max(0.0, real_video_duration - 1.0), 2)
                 zoom_events.append({
-                    "t": t_cal,
+                    "t": t_val,
                     "x": ev["x"],
                     "y": ev["y"],
                     "type": ev["type"],
@@ -764,29 +765,34 @@ def RecordInteractive(
             ),
         )
 
-        session_start_time = time.time()
+        session_start_epoch = time.time()
         raw_zoom_events: List[Dict[str, Any]] = []
 
         def on_record_zoom_event(ev):
-            t_wall = time.time()
+            raw_wall = ev.get("wall_time")
+            if raw_wall is not None:
+                t = round(max(0.0, float(raw_wall) - session_start_epoch), 2)
+            else:
+                t = round(max(0.0, time.time() - session_start_epoch), 2)
             raw_x = ev.get("x", 640.0)
             raw_y = ev.get("y", 360.0)
             ev_type = str(ev.get("type", "in")).lower()
             event_dict = {
-                "t_wall": t_wall,
+                "t": t,
                 "x": float(raw_x),
                 "y": float(raw_y),
                 "type": ev_type,
             }
             raw_zoom_events.append(event_dict)
             action_label = "ZOOM-IN" if ev_type == "in" else "ZOOM-OUT"
-            print(f"[{company_name}] >> Captured {action_label} at cursor ({raw_x}, {raw_y})")
+            print(f"[{company_name}] >> Captured {action_label} at cursor ({raw_x}, {raw_y}) at t={t}s")
 
         context.expose_function("__playwright_record_zoom_event", on_record_zoom_event)
         context.add_init_script(INJECTED_VISUALS_SCRIPT)
 
         page = context.new_page()
         _CURRENT_PAGE = page
+        session_start_epoch = time.time()
 
         print(f"[{company_name}] Opening {url} in visible browser...")
         try:
@@ -815,27 +821,33 @@ def RecordInteractive(
         print("      * Press ENTER in this console.")
         print("=" * 68 + "\n")
 
-        import threading
-        stop_event = threading.Event()
-
-        def wait_for_enter():
-            try:
-                input()
-            except Exception:
-                pass
-            stop_event.set()
-
-        t_input = threading.Thread(target=wait_for_enter, daemon=True)
-        t_input.start()
-
-        while not stop_event.is_set():
+        while True:
             if page.is_closed():
                 print(f"[{company_name}] Browser window closed by user.")
                 break
-            time.sleep(0.3)
 
-        session_end_time = time.time()
-        total_wall_time = session_end_time - session_start_time
+            # Non-blocking console check for Enter key
+            try:
+                if sys.platform == "win32":
+                    import msvcrt
+                    if msvcrt.kbhit():
+                        ch = msvcrt.getch()
+                        if ch in (b'\r', b'\n'):
+                            print(f"[{company_name}] Enter pressed in console.")
+                            break
+                else:
+                    import select
+                    if select.select([sys.stdin], [], [], 0)[0]:
+                        sys.stdin.readline()
+                        print(f"[{company_name}] Enter pressed in console.")
+                        break
+            except Exception:
+                pass
+
+            try:
+                page.wait_for_timeout(300)
+            except Exception:
+                break
 
         video_obj = page.video
 
@@ -878,19 +890,12 @@ def RecordInteractive(
 
         zoom_events: List[Dict[str, Any]] = []
         if len(raw_zoom_events) > 0:
-            if real_video_duration > 0 and total_wall_time > real_video_duration:
-                pts_zero_wall = session_end_time - real_video_duration
-                offset = total_wall_time - real_video_duration
-                print(f"[{company_name}] Calibrating events to video timeline (duration: {real_video_duration:.2f}s, startup offset: {offset:.2f}s)")
-            else:
-                pts_zero_wall = session_start_time
-
             for ev in raw_zoom_events:
-                t_calibrated = round(max(0.0, ev["t_wall"] - pts_zero_wall), 2)
-                if real_video_duration > 0:
-                    t_calibrated = min(round(real_video_duration - 0.05, 2), t_calibrated)
+                t_val = ev["t"]
+                if real_video_duration > 0 and t_val >= real_video_duration:
+                    t_val = round(max(0.0, real_video_duration - 1.0), 2)
                 zoom_events.append({
-                    "t": t_calibrated,
+                    "t": t_val,
                     "x": ev["x"],
                     "y": ev["y"],
                     "type": ev["type"],
