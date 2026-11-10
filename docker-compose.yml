@@ -6,6 +6,7 @@ services:
     volumes:
       - uploads:/app/uploads
     environment:
+      TZ: Europe/Moscow
       DB_HOST: db
       DB_PORT: 5432
       DB_NAME: videos
@@ -18,6 +19,8 @@ services:
   db:
     image: postgres:16
     environment:
+      TZ: Europe/Moscow
+      PGTZ: Europe/Moscow
       POSTGRES_DB: videos
       POSTGRES_USER: video_user
       POSTGRES_PASSWORD: video_pass

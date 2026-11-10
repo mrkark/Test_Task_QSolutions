@@ -7,6 +7,9 @@ build/
 videos.db*
 uploads/
 video/*.webm
+video/*.zoom.json
 !video/Alpha_Magento_Solutions.webm
 !video/Alpha_Magento_Solutions.zoomed.webm
-!video/*.zoom.json
+!video/Alpha_Magento_Solutions.webm.zoom.json
+!video/Alpha_Magento_Solutions.webp
+!video/Operator_Zoom_Test.webm.zoom.json
