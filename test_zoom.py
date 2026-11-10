@@ -30,6 +30,7 @@ from apply_zoom import (
     build_zoom_filter,
     build_ffmpeg_command,
     apply_zoom,
+    get_video_duration,
 )
 
 
@@ -227,6 +228,29 @@ class TestEasingAndTimelineMath:
         assert z2 == 2.0
         assert x2 == 800.0
 
+    def test_key_repeat_debounce_guard(self):
+        """Spurious 'out' events fired within 300ms of 'in' (OS key repeat) must be ignored."""
+        events = [
+            {"t": 5.0, "x": 400.0, "y": 300.0, "type": "in"},
+            {"t": 5.05, "x": 400.0, "y": 300.0, "type": "out"},  # Spurious repeat
+            {"t": 10.0, "x": 400.0, "y": 300.0, "type": "out"},  # Real intentional exit
+        ]
+        intervals = pair_zoom_events(events)
+        assert len(intervals) == 1
+        assert intervals[0]["t_in"] == 5.0
+        assert intervals[0]["t_out"] == 10.0
+
+    def test_single_f5_with_repeat_becomes_open_ended(self):
+        """If user presses F5 once and OS sends a repeat out at exact same timestamp, zoom stays open-ended."""
+        events = [
+            {"t": 55.07, "x": 420.0, "y": 57.0, "type": "in"},
+            {"t": 55.07, "x": 420.0, "y": 57.0, "type": "out"},
+        ]
+        intervals = pair_zoom_events(events)
+        assert len(intervals) == 1
+        assert intervals[0]["t_in"] == 55.07
+        assert intervals[0]["t_out"] is None
+
 
 class TestFilterGenerationAndCommands:
     def test_no_events_copy_unchanged_command(self):
@@ -250,6 +274,16 @@ class TestFilterGenerationAndCommands:
         assert "clip(" in vf
         assert "iw-iw/zoom" in vf
         assert "pow(" in vf
+
+    def test_out_shorter_than_ramp_clamped(self):
+        """When t_out < t_in + ramp_sec, filter generation must clamp t_out >= t_in + ramp_sec."""
+        intervals = [{"t_in": 2.0, "t_out": 2.2, "x": 500.0, "y": 300.0}]
+        vf = build_zoom_filter(intervals, width=1280, height=720, fps=25, zoom_factor=2.0, ramp_sec=0.5)
+        # ramp_in ends at 2.5, effective_t_out must be at least 2.5
+        assert "between(time,2.500,2.500)" in vf or "between(time,2.000,2.500)" in vf
+
+    def test_get_video_duration_non_existent(self):
+        assert get_video_duration("non_existent_file.webm") == 0.0
 
     def test_dry_run_command_output(self, tmp_path):
         dummy_video = tmp_path / "dummy.webm"

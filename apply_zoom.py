@@ -7,6 +7,7 @@ renders a smooth zoom-in -> hold -> zoom-out effect centered at recorded mouse c
 """
 
 import os
+import re
 import sys
 import json
 import shutil
@@ -41,6 +42,24 @@ def find_ffmpeg(custom_path: Optional[str] = None) -> str:
 
     # Default fallback
     return "ffmpeg"
+
+
+def get_video_duration(video_path: str, ffmpeg_bin: Optional[str] = None) -> float:
+    """Extracts video duration in seconds using ffmpeg."""
+    if not os.path.exists(video_path):
+        return 0.0
+    actual_ffmpeg = find_ffmpeg(ffmpeg_bin)
+    try:
+        res = subprocess.run([actual_ffmpeg, "-i", video_path], capture_output=True, text=True)
+        m = re.search(r"Duration:\s*(\d+):(\d+):([\d\.]+)", res.stderr)
+        if m:
+            hours = float(m.group(1))
+            minutes = float(m.group(2))
+            seconds = float(m.group(3))
+            return round(hours * 3600.0 + minutes * 60.0 + seconds, 3)
+    except Exception:
+        pass
+    return 0.0
 
 
 def find_sidecar(video_path: str, explicit_sidecar: Optional[str] = None) -> Optional[str]:
@@ -115,6 +134,7 @@ def pair_zoom_events(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     Pairs each 'in' with the next 'out':
     - Zoom-in (ramp) -> hold (user-controlled) -> zoom-out (ramp)
     - If an 'in' has no following 'out', hold the zoom to the end of the video (open-ended zoom).
+    - Ignores spurious 'out' events triggered too quickly (< 0.3s) after 'in' (OS key repeat / debounce guard).
     """
     intervals = []
     current_in = None
@@ -133,6 +153,9 @@ def pair_zoom_events(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             current_in = ev
         elif ev_type == "out":
             if current_in is not None:
+                # Debounce guard: if out occurs virtually instantly after in, treat as repeat/bounce and ignore
+                if ev["t"] - current_in["t"] < 0.3:
+                    continue
                 intervals.append({
                     "t_in": current_in["t"],
                     "t_out": ev["t"],
@@ -266,13 +289,14 @@ def build_zoom_filter(intervals: List[Dict[str, Any]], width: int, height: int, 
             cond_hold = f"gte(time,{t_in+r:.3f})"
             z_expr = f"if({cond_in},{z_ramp_in},if({cond_hold},{z_max:.3f},{z_expr}))"
         else:
-            p_out = f"((time-{t_out:.3f})/{r:.3f})"
+            effective_t_out = max(t_out, t_in + r)
+            p_out = f"((time-{effective_t_out:.3f})/{r:.3f})"
             ease_out = f"(1.0-(3*pow({p_out},2)-2*pow({p_out},3)))"
             z_ramp_out = f"(1.0+{delta_z:.3f}*{ease_out})"
 
             cond_in = f"between(time,{t_in:.3f},{t_in+r:.3f})"
-            cond_hold = f"between(time,{t_in+r:.3f},{t_out:.3f})"
-            cond_out = f"between(time,{t_out:.3f},{t_out+r:.3f})"
+            cond_hold = f"between(time,{t_in+r:.3f},{effective_t_out:.3f})"
+            cond_out = f"between(time,{effective_t_out:.3f},{effective_t_out+r:.3f})"
 
             z_expr = f"if({cond_in},{z_ramp_in},if({cond_hold},{z_max:.3f},if({cond_out},{z_ramp_out},{z_expr})))"
 
@@ -283,7 +307,8 @@ def build_zoom_filter(intervals: List[Dict[str, Any]], width: int, height: int, 
     for item in reversed(intervals):
         t_in = item["t_in"]
         t_out = item["t_out"]
-        t_end = (t_out + ramp_sec) if t_out is not None else 999999.0
+        effective_t_out = max(t_out, t_in + ramp_sec) if t_out is not None else None
+        t_end = (effective_t_out + ramp_sec) if effective_t_out is not None else 999999.0
         cond = f"between(time,{t_in:.3f},{t_end:.3f})"
         px_expr = f"if({cond},{item['x']:.1f},{px_expr})"
         py_expr = f"if({cond},{item['y']:.1f},{py_expr})"
@@ -304,6 +329,7 @@ def build_ffmpeg_command(
     """
     Builds the full FFmpeg command list.
     If no events are present, selects the 'copy unchanged' path.
+    Aligns event timestamps if they exceed actual video duration.
     """
     events = sidecar_data.get("events", [])
     intervals = pair_zoom_events(events)
@@ -317,6 +343,20 @@ def build_ffmpeg_command(
             "-c", "copy",
             output_path,
         ]
+
+    # Align timestamps if sidecar was recorded with wall-clock drift
+    video_duration = get_video_duration(video_path, ffmpeg_bin=ffmpeg_bin)
+    if video_duration > 0 and intervals:
+        all_past_end = all(it["t_in"] >= video_duration for it in intervals)
+        if all_past_end:
+            min_tin = min(it["t_in"] for it in intervals)
+            target_t = max(0.0, video_duration - 5.0)
+            shift = min_tin - target_t
+            print(f"[apply_zoom] Notice: Event t_in ({min_tin}s) exceeds video duration ({video_duration:.2f}s). Shifting timestamps by -{shift:.2f}s.")
+            for it in intervals:
+                it["t_in"] = round(max(0.0, it["t_in"] - shift), 2)
+                if it["t_out"] is not None:
+                    it["t_out"] = round(max(it["t_in"] + 0.5, it["t_out"] - shift), 2)
 
     viewport = sidecar_data.get("viewport", {"width": 1280, "height": 720})
     w = int(viewport.get("width", 1280))
@@ -333,6 +373,10 @@ def build_ffmpeg_command(
         "-i", video_path,
         "-vf", vf,
         "-c:v", "libvpx-vp9",
+        "-threads", "4",
+        "-row-mt", "1",
+        "-deadline", "realtime",
+        "-cpu-used", "4",
         output_path,
     ]
 

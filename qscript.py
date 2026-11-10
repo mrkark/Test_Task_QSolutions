@@ -238,7 +238,13 @@ INJECTED_VISUALS_SCRIPT = """
             });
         }
 
+        let lastToggleTime = 0;
         function toggleZoom(x, y) {
+            const now = Date.now();
+            if (now - lastToggleTime < 500) {
+                return null;
+            }
+            lastToggleTime = now;
             isZoomedIn = !isZoomedIn;
             const evType = isZoomedIn ? 'in' : 'out';
             showZoomIndicator(x, y, evType);
@@ -279,6 +285,7 @@ INJECTED_VISUALS_SCRIPT = """
             if (e.key === 'F5' || e.code === 'F5' || e.keyCode === 116) {
                 e.preventDefault();
                 e.stopPropagation();
+                if (e.repeat) return;
                 toggleZoom(lastMouseX, lastMouseY);
             }
         }, { capture: true });
@@ -481,21 +488,22 @@ def CaptureVideo_Magento(
             locale=language or "en-US",
         )
 
-        video_start_time = time.time()
+        session_start_time = time.time()
+        raw_zoom_events: List[Dict[str, Any]] = []
 
         def on_record_zoom_event(ev):
-            t = round(max(0.0, time.time() - video_start_time), 2)
+            t_wall = time.time()
             raw_x = ev.get("x")
             raw_y = ev.get("y")
             target_x = float(raw_x) if raw_x is not None else float(_CURRENT_MOUSE_POS[0])
             target_y = float(raw_y) if raw_y is not None else float(_CURRENT_MOUSE_POS[1])
             event_dict = {
-                "t": t,
+                "t_wall": t_wall,
                 "x": target_x,
                 "y": target_y,
                 "type": str(ev.get("type", "in")).lower(),
             }
-            zoom_events.append(event_dict)
+            raw_zoom_events.append(event_dict)
             print(f"[{company_name}] Captured zoom event at cursor ({target_x:.1f}, {target_y:.1f}): {event_dict}")
 
         context.expose_function("__playwright_record_zoom_event", on_record_zoom_event)
@@ -625,6 +633,9 @@ def CaptureVideo_Magento(
 
         video_obj = page.video
 
+        session_end_time = time.time()
+        total_wall_time = session_end_time - session_start_time
+
         _CURRENT_PAGE = None
         context.close()
         context = None
@@ -644,6 +655,27 @@ def CaptureVideo_Magento(
 
         os.replace(raw_video_path, final_video_path)
         abs_final_path = os.path.abspath(final_video_path)
+
+        from apply_zoom import get_video_duration
+        real_video_duration = get_video_duration(abs_final_path)
+
+        zoom_events: List[Dict[str, Any]] = []
+        if len(raw_zoom_events) > 0:
+            if real_video_duration > 0 and total_wall_time > real_video_duration:
+                pts_zero_wall = session_end_time - real_video_duration
+            else:
+                pts_zero_wall = session_start_time
+
+            for ev in raw_zoom_events:
+                t_cal = round(max(0.0, ev["t_wall"] - pts_zero_wall), 2)
+                if real_video_duration > 0:
+                    t_cal = min(round(real_video_duration - 0.05, 2), t_cal)
+                zoom_events.append({
+                    "t": t_cal,
+                    "x": ev["x"],
+                    "y": ev["y"],
+                    "type": ev["type"],
+                })
 
         if len(zoom_events) > 0:
             sidecar_path = f"{abs_final_path}.zoom.json"
@@ -732,22 +764,23 @@ def RecordInteractive(
             ),
         )
 
-        video_start_time = time.time()
+        session_start_time = time.time()
+        raw_zoom_events: List[Dict[str, Any]] = []
 
         def on_record_zoom_event(ev):
-            t = round(max(0.0, time.time() - video_start_time), 2)
+            t_wall = time.time()
             raw_x = ev.get("x", 640.0)
             raw_y = ev.get("y", 360.0)
             ev_type = str(ev.get("type", "in")).lower()
             event_dict = {
-                "t": t,
+                "t_wall": t_wall,
                 "x": float(raw_x),
                 "y": float(raw_y),
                 "type": ev_type,
             }
-            zoom_events.append(event_dict)
+            raw_zoom_events.append(event_dict)
             action_label = "ZOOM-IN" if ev_type == "in" else "ZOOM-OUT"
-            print(f"[{company_name}] >> Captured {action_label} at cursor ({raw_x}, {raw_y}) at t={t}s")
+            print(f"[{company_name}] >> Captured {action_label} at cursor ({raw_x}, {raw_y})")
 
         context.expose_function("__playwright_record_zoom_event", on_record_zoom_event)
         context.add_init_script(INJECTED_VISUALS_SCRIPT)
@@ -801,6 +834,9 @@ def RecordInteractive(
                 break
             time.sleep(0.3)
 
+        session_end_time = time.time()
+        total_wall_time = session_end_time - session_start_time
+
         video_obj = page.video
 
         _CURRENT_PAGE = None
@@ -837,6 +873,29 @@ def RecordInteractive(
         os.replace(raw_video_path, final_video_path)
         abs_final_path = os.path.abspath(final_video_path)
 
+        from apply_zoom import get_video_duration, apply_zoom
+        real_video_duration = get_video_duration(abs_final_path)
+
+        zoom_events: List[Dict[str, Any]] = []
+        if len(raw_zoom_events) > 0:
+            if real_video_duration > 0 and total_wall_time > real_video_duration:
+                pts_zero_wall = session_end_time - real_video_duration
+                offset = total_wall_time - real_video_duration
+                print(f"[{company_name}] Calibrating events to video timeline (duration: {real_video_duration:.2f}s, startup offset: {offset:.2f}s)")
+            else:
+                pts_zero_wall = session_start_time
+
+            for ev in raw_zoom_events:
+                t_calibrated = round(max(0.0, ev["t_wall"] - pts_zero_wall), 2)
+                if real_video_duration > 0:
+                    t_calibrated = min(round(real_video_duration - 0.05, 2), t_calibrated)
+                zoom_events.append({
+                    "t": t_calibrated,
+                    "x": ev["x"],
+                    "y": ev["y"],
+                    "type": ev["type"],
+                })
+
         sidecar_path = None
         if len(zoom_events) > 0:
             sidecar_path = f"{abs_final_path}.zoom.json"
@@ -849,13 +908,12 @@ def RecordInteractive(
             }
             with open(sidecar_path, "w", encoding="utf-8") as sf:
                 json.dump(sidecar_data, sf, indent=2)
-            print(f"[{company_name}] Sidecar successfully created with {len(zoom_events)} events: {sidecar_path}")
+            print(f"[{company_name}] Sidecar successfully created with {len(zoom_events)} calibrated events: {sidecar_path}")
         else:
             print(f"[{company_name}] No F5 zoom events were recorded. Sidecar was not created (per specification).")
 
         zoomed_path = None
         if auto_apply_zoom and sidecar_path and os.path.exists(sidecar_path):
-            from apply_zoom import apply_zoom
             zoomed_path = os.path.join(target_dir, f"{clean_name}.zoomed.webm")
             print(f"[{company_name}] Applying FFmpeg zoom post-processing...")
             code, msg = apply_zoom(
