@@ -162,7 +162,16 @@ def index():
     db = get_db()
     with db.cursor() as cur:
         cur.execute("SELECT id, company_name, file_path, video_url, processed_video_url, sidecar_path, created_at, updated_at FROM videos ORDER BY id DESC")
-        rows = [dict(row) for row in cur.fetchall()]
+        raw_rows = [dict(row) for row in cur.fetchall()]
+
+    rows = []
+    for r in raw_rows:
+        orig_file = os.path.basename(r.get("video_url") or "")
+        zoom_file = os.path.basename(r.get("processed_video_url") or "")
+        r["rel_video_url"] = f"/media/{orig_file}" if orig_file else ""
+        r["rel_processed_url"] = f"/media/{zoom_file}" if zoom_file else ""
+        r["display_url"] = r["rel_processed_url"] or r["rel_video_url"]
+        rows.append(r)
 
     html = """<!DOCTYPE html>
 <html lang="en">
@@ -445,6 +454,7 @@ def index():
                 <span class="muted">Containerized video registry with Camtasia-style FFmpeg zoompan processing</span>
             </div>
             <div style="display: flex; gap: 8px;">
+                <button class="btn btn-sm btn-blue" onclick="syncLocalVideos()">🔄 Sync Videos (/sync)</button>
                 <button class="btn btn-sm" onclick="fetchRecords()">List Records (/videos)</button>
             </div>
         </div>
@@ -559,8 +569,8 @@ def index():
                         <td class="muted">{{ row.id }}</td>
                         <td><code>{{ row.company_name }}</code></td>
                         <td>
-                            <video controls preload="metadata">
-                                <source src="{{ row.processed_video_url or row.video_url }}" type="video/webm">
+                            <video controls preload="metadata" style="width: 160px; height: 90px; border-radius: 4px; background: #000;">
+                                <source src="{{ row.display_url }}" type="video/webm">
                             </video>
                         </td>
                         <td>
@@ -572,8 +582,11 @@ def index():
                         </td>
                         <td>
                             <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-                                <button class="btn btn-sm" onclick="playRecord('{{ row.company_name }}', '{{ row.video_url }}', '{{ row.processed_video_url or '' }}')">Play</button>
+                                <button class="btn btn-sm btn-primary" onclick="playRecord('{{ row.company_name }}', '{{ row.rel_video_url }}', '{{ row.rel_processed_url }}')">Play</button>
+                                <a class="btn btn-sm" href="{{ row.display_url }}" target="_blank">Open</a>
+                                {% if not row.processed_video_url %}
                                 <button class="btn btn-sm btn-purple" onclick="triggerProcess({{ row.id }})">Process Zoom</button>
+                                {% endif %}
                                 <button class="btn btn-sm" onclick="selectCompany('{{ row.company_name }}')">API</button>
                             </div>
                         </td>
@@ -748,6 +761,19 @@ def index():
                 statusEl.innerHTML = `<span style="color:#f0883e;">ℹ️ Сервер запущен в контейнере Docker. Для записи с окном браузера на Windows запустите <b>record_interactive.bat</b></span>`;
             }
         }
+        async function syncLocalVideos() {
+            showResponse('--> POST /sync [Syncing recorded videos into Docker database...]');
+            try {
+                const res = await fetch('/sync', { method: 'POST' });
+                const data = await res.json();
+                showResponse(`<-- HTTP ${res.status}\n` + JSON.stringify(data, null, 2));
+                if (res.ok) {
+                    setTimeout(() => location.reload(), 1500);
+                }
+            } catch (err) {
+                showResponse(`<-- Sync error: ${err}`);
+            }
+        }
     </script>
 </body>
 </html>"""
@@ -786,32 +812,42 @@ def upload_video():
             sidecar_path = os.path.abspath(os.path.join(UPLOAD_FOLDER, sidecar_filename))
             uploaded_sidecar.save(sidecar_path)
 
-    auto_process = request.form.get("auto_process", "1").lower() in ("1", "true", "yes")
-
     base_url = request.host_url.rstrip("/")
     video_url = f"{base_url}/media/{filename}"
+
+    processed_video_url = None
+    if "processed_file" in request.files:
+        uploaded_processed = request.files["processed_file"]
+        if uploaded_processed and uploaded_processed.filename:
+            base, ext = os.path.splitext(filename)
+            proc_filename = f"{base}.zoomed{ext or '.webm'}"
+            proc_path = os.path.abspath(os.path.join(UPLOAD_FOLDER, proc_filename))
+            uploaded_processed.save(proc_path)
+            processed_video_url = f"{base_url}/media/{proc_filename}"
+
+    auto_process = request.form.get("auto_process", "1").lower() in ("1", "true", "yes")
 
     db = get_db()
     with db.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO videos (company_name, file_path, video_url, sidecar_path, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, NOW(), NOW())
+            INSERT INTO videos (company_name, file_path, video_url, processed_video_url, sidecar_path, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
             ON CONFLICT (company_name) DO UPDATE SET
                 file_path = EXCLUDED.file_path,
                 video_url = EXCLUDED.video_url,
+                processed_video_url = COALESCE(EXCLUDED.processed_video_url, videos.processed_video_url),
                 sidecar_path = COALESCE(EXCLUDED.sidecar_path, videos.sidecar_path),
                 updated_at = NOW()
             RETURNING id;
             """,
-            (company_name, absolute_file_path, video_url, sidecar_path),
+            (company_name, absolute_file_path, video_url, processed_video_url, sidecar_path),
         )
         row = cur.fetchone()
         video_id = row["id"]
     db.commit()
 
-    processed_video_url = None
-    if auto_process and (sidecar_path or find_sidecar(absolute_file_path)):
+    if not processed_video_url and auto_process and (sidecar_path or find_sidecar(absolute_file_path)):
         try:
             res = process_video_job(video_id, base_url)
             processed_video_url = res.get("processed_video_url")
@@ -825,6 +861,52 @@ def upload_video():
         "processed_video_url": processed_video_url,
         "sidecar_path": sidecar_path,
     }), 200
+
+
+@app.route("/sync", methods=["POST", "GET"])
+def sync_endpoint():
+    """Scans UPLOAD_FOLDER and registers any video files into PostgreSQL."""
+    base_url = request.host_url.rstrip("/")
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    synced = []
+
+    for fn in os.listdir(UPLOAD_FOLDER):
+        if not fn.endswith(".webm") or fn.endswith(".zoomed.webm"):
+            continue
+        company_name = os.path.splitext(fn)[0]
+        abs_path = os.path.abspath(os.path.join(UPLOAD_FOLDER, fn))
+        video_url = f"{base_url}/media/{fn}"
+
+        sidecar_fn = f"{fn}.zoom.json"
+        sidecar_path = os.path.abspath(os.path.join(UPLOAD_FOLDER, sidecar_fn))
+        if not os.path.exists(sidecar_path):
+            sidecar_path = None
+
+        zoomed_fn = f"{company_name}.zoomed.webm"
+        zoomed_path = os.path.join(UPLOAD_FOLDER, zoomed_fn)
+        proc_url = f"{base_url}/media/{zoomed_fn}" if os.path.exists(zoomed_path) else None
+
+        db = get_db()
+        with db.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO videos (company_name, file_path, video_url, processed_video_url, sidecar_path, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+                ON CONFLICT (company_name) DO UPDATE SET
+                    file_path = EXCLUDED.file_path,
+                    video_url = EXCLUDED.video_url,
+                    processed_video_url = COALESCE(EXCLUDED.processed_video_url, videos.processed_video_url),
+                    sidecar_path = COALESCE(EXCLUDED.sidecar_path, videos.sidecar_path),
+                    updated_at = NOW()
+                RETURNING id;
+                """,
+                (company_name, abs_path, video_url, proc_url, sidecar_path),
+            )
+            row = cur.fetchone()
+        db.commit()
+        synced.append({"id": row["id"], "company_name": company_name, "processed": bool(proc_url)})
+
+    return jsonify({"status": "synced", "count": len(synced), "records": synced}), 200
 
 
 @app.route("/jobs/<int:video_id>/process", methods=["POST"])

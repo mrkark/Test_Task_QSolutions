@@ -60,32 +60,37 @@ def process_csv(
 
             if video_path:
                 print(f"Saved video path: {video_path}")
-                final_path_to_upload = video_path
 
                 sidecar_path = f"{video_path}.zoom.json"
+                zoomed_path = None
                 if run_apply_zoom and os.path.exists(sidecar_path):
                     print(f"Applying zoom post-processing locally for {company}...")
-                    zoomed_path = f"{os.path.splitext(video_path)[0]}.zoomed.webm"
-                    code, _ = apply_zoom(video_path=video_path, sidecar_path=sidecar_path, output_path=zoomed_path)
-                    if code == 0 and os.path.exists(zoomed_path):
-                        final_path_to_upload = zoomed_path
+                    candidate_zoomed = f"{os.path.splitext(video_path)[0]}.zoomed.webm"
+                    code, msg = apply_zoom(video_path=video_path, sidecar_path=sidecar_path, output_path=candidate_zoomed)
+                    if code == 0 and os.path.exists(candidate_zoomed):
+                        zoomed_path = candidate_zoomed
+                        print(f"Zoomed video created: {zoomed_path}")
+                    else:
+                        print(f"apply_zoom note for {company}: {msg}")
 
-                saved_video_paths.append(final_path_to_upload)
+                saved_video_paths.append(zoomed_path or video_path)
 
                 if server_url:
                     try:
                         from video_client import UploadVideo
-                        print(f"Uploading video for {company} to {server_url}...")
+                        print(f"Uploading video for {company} to Docker database ({server_url})...")
                         video_url = UploadVideo(
                             server_url=server_url,
-                            video_path=final_path_to_upload,
+                            video_path=video_path,
                             company_name=company,
                             sidecar_path=sidecar_path if os.path.exists(sidecar_path) else None,
+                            processed_video_path=zoomed_path,
+                            auto_process=True,
                         )
-                        print(f"Uploaded video URL: {video_url}")
+                        print(f"Uploaded successfully! Video URL: {video_url}")
                         preview_video(video_url, view_seconds)
                     except Exception as upload_err:
-                        print(f"Upload/preview failed for {company}: {upload_err}", file=sys.stderr)
+                        print(f"Upload/preview note for {company}: {upload_err}", file=sys.stderr)
             else:
                 print(f"Warning: Failed to capture video for {company}", file=sys.stderr)
 
@@ -96,32 +101,44 @@ def process_csv(
 def main():
     parser = argparse.ArgumentParser(description="CSV-driven browser automation and video recorder with zoom and server upload")
     parser.add_argument("csv_file", nargs="?", default="input.csv", help="Path to input CSV file (default: input.csv)")
-    parser.add_argument("--server", type=str, default=None, help="Server URL for video upload and preview (e.g. http://127.0.0.1:8000)")
+    parser.add_argument(
+        "--server",
+        type=str,
+        default=os.environ.get("SERVER_URL", "http://127.0.0.1:8000"),
+        help="Docker web service URL (default: http://127.0.0.1:8000)",
+    )
+    parser.add_argument("--no-server", action="store_true", help="Do not upload recorded videos to Docker server")
     parser.add_argument("--view-seconds", type=float, default=5.0, help="Seconds to preview the video (>0: wait N seconds, 0: wait for Enter)")
-    parser.add_argument("--zoom", action="store_true", help="Enable Camtasia-style zoom capture during recording")
-    parser.add_argument("--apply-zoom", action="store_true", help="Locally run apply_zoom post-processing before uploading")
+    parser.add_argument("--zoom", action="store_true", default=True, help="Enable Camtasia-style zoom capture during recording (default: True)")
+    parser.add_argument("--no-zoom", action="store_true", help="Disable zoom capture during recording")
+    parser.add_argument("--apply-zoom", action="store_true", default=True, help="Locally run apply_zoom post-processing before uploading (default: True)")
+    parser.add_argument("--no-apply-zoom", action="store_true", help="Skip local apply_zoom rendering")
     parser.add_argument("--interactive", "--manual", action="store_true", help="Launch interactive recorder for human operator to test F5 zoom live")
     parser.add_argument("--url", type=str, default="https://duckduckgo.com", help="Initial URL for interactive recording")
     parser.add_argument("--name", type=str, default="Manual_Recording", help="Recording / Company name for interactive recording")
 
     args = parser.parse_args()
 
+    server = None if (args.no_server or not args.server) else args.server
+    enable_zoom = False if args.no_zoom else args.zoom
+    run_apply_zoom = False if args.no_apply_zoom else args.apply_zoom
+
     if args.interactive:
         print("[*] Launching interactive manual recorder...")
         qscript.RecordInteractive(
             url=args.url,
             company_name=args.name,
-            auto_apply_zoom=True,
-            server_url=args.server,
+            auto_apply_zoom=run_apply_zoom,
+            server_url=server,
         )
         return
 
     process_csv(
         csv_filepath=args.csv_file,
-        server_url=args.server,
+        server_url=server,
         view_seconds=args.view_seconds,
-        enable_zoom=args.zoom,
-        run_apply_zoom=args.apply_zoom,
+        enable_zoom=enable_zoom,
+        run_apply_zoom=run_apply_zoom,
     )
 
 

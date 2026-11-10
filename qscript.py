@@ -935,12 +935,13 @@ def RecordInteractive(
         if server_url:
             try:
                 from video_client import UploadVideo
-                print(f"[{company_name}] Uploading video and sidecar to {server_url}...")
+                print(f"[{company_name}] Uploading video, sidecar and zoomed version to {server_url}...")
                 uploaded_url = UploadVideo(
                     server_url=server_url,
                     video_path=abs_final_path,
                     company_name=company_name,
                     sidecar_path=sidecar_path,
+                    processed_video_path=zoomed_path,
                     auto_process=True,
                 )
                 print(f"[{company_name}] Uploaded! Video URL: {uploaded_url}")
