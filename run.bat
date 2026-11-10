@@ -1,4 +1,6 @@
 @echo off
+@chcp 65001 >nul
+setlocal EnableExtensions DisableDelayedExpansion
 echo ====================================================
 echo Starting Browser Automation Video Recorder
 echo ====================================================

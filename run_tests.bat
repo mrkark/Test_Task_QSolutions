@@ -1,5 +1,6 @@
 @echo off
-setlocal
+@chcp 65001 >nul
+setlocal EnableExtensions DisableDelayedExpansion
 
 echo ====================================================
 echo  Running Unit Tests for Web Service and API
