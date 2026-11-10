@@ -103,9 +103,44 @@ INJECTED_VISUALS_SCRIPT = """
                 display: none;
             `;
 
+            const zoomBtn = document.createElement('div');
+            zoomBtn.id = '__playwright_zoom_btn__';
+            zoomBtn.style.cssText = `
+                position: fixed;
+                top: 14px;
+                right: 14px;
+                padding: 6px 14px;
+                border-radius: 20px;
+                background: rgba(15, 23, 42, 0.9);
+                color: #ffffff;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+                font-size: 13px;
+                font-weight: 600;
+                border: 1px solid rgba(255, 255, 255, 0.25);
+                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+                cursor: pointer;
+                pointer-events: auto;
+                z-index: 2147483647;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                user-select: none;
+                transition: all 0.2s ease;
+            `;
+            zoomBtn.innerHTML = `
+                <span id="__playwright_zoom_dot__" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#00e676;box-shadow:0 0 8px #00e676;"></span>
+                <span id="__playwright_zoom_text__">Zoom (F5)</span>
+            `;
+            zoomBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleZoom(lastMouseX, lastMouseY);
+            });
+
             container.appendChild(highlight);
             container.appendChild(cursor);
             container.appendChild(callout);
+            container.appendChild(zoomBtn);
             document.documentElement.appendChild(container);
         }
 
@@ -207,6 +242,26 @@ INJECTED_VISUALS_SCRIPT = """
             isZoomedIn = !isZoomedIn;
             const evType = isZoomedIn ? 'in' : 'out';
             showZoomIndicator(x, y, evType);
+
+            const dot = document.getElementById('__playwright_zoom_dot__');
+            const txt = document.getElementById('__playwright_zoom_text__');
+            const btn = document.getElementById('__playwright_zoom_btn__');
+            if (dot && txt && btn) {
+                if (isZoomedIn) {
+                    dot.style.background = '#ff3d00';
+                    dot.style.boxShadow = '0 0 10px #ff3d00';
+                    txt.textContent = 'Zooming 2x (F5 to Exit)';
+                    btn.style.borderColor = 'rgba(255, 61, 0, 0.7)';
+                    btn.style.background = 'rgba(40, 10, 10, 0.95)';
+                } else {
+                    dot.style.background = '#00e676';
+                    dot.style.boxShadow = '0 0 8px #00e676';
+                    txt.textContent = 'Zoom (F5)';
+                    btn.style.borderColor = 'rgba(255, 255, 255, 0.25)';
+                    btn.style.background = 'rgba(15, 23, 42, 0.9)';
+                }
+            }
+
             const ev = {
                 x: Math.round(x),
                 y: Math.round(y),
@@ -221,7 +276,7 @@ INJECTED_VISUALS_SCRIPT = """
         }
 
         window.addEventListener('keydown', (e) => {
-            if (e.key === 'F5' || e.code === 'F5') {
+            if (e.key === 'F5' || e.code === 'F5' || e.keyCode === 116) {
                 e.preventDefault();
                 e.stopPropagation();
                 toggleZoom(lastMouseX, lastMouseY);
@@ -608,6 +663,238 @@ def CaptureVideo_Magento(
 
     except Exception as exc:
         print(f"[{company_name}] ERROR: Failed to capture video: {exc}", file=sys.stderr)
+        return None
+
+    finally:
+        _CURRENT_PAGE = None
+        if context:
+            try:
+                context.close()
+            except Exception:
+                pass
+        if browser:
+            try:
+                browser.close()
+            except Exception:
+                pass
+        if playwright_instance:
+            try:
+                playwright_instance.stop()
+            except Exception:
+                pass
+
+
+def RecordInteractive(
+    url: str = "https://duckduckgo.com",
+    company_name: str = "Manual_Recording",
+    target_folder: str = PATH_TO_VIDEO_FOLDER,
+    auto_apply_zoom: bool = True,
+    server_url: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Launches a visible Chromium window for interactive recording by an operator.
+    The operator can browse, move the mouse, and press F5 (or click [Zoom (F5)])
+    to test the zoom-in and zoom-out effect live at their cursor position.
+    When the operator closes the browser (or presses ENTER in the console),
+    the video and sidecar are saved, automatically post-processed with FFmpeg,
+    and optionally uploaded to the Docker web service.
+    """
+    global _CURRENT_PAGE
+
+    target_dir = os.path.abspath(target_folder)
+    os.makedirs(target_dir, exist_ok=True)
+
+    playwright_instance = None
+    browser = None
+    context = None
+    page = None
+    zoom_events: List[Dict[str, Any]] = []
+
+    try:
+        playwright_instance = sync_playwright().start()
+
+        browser = playwright_instance.chromium.launch(
+            headless=False,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+            ],
+        )
+
+        context = browser.new_context(
+            record_video_dir=target_dir,
+            record_video_size={"width": 1280, "height": 720},
+            viewport={"width": 1280, "height": 720},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
+        )
+
+        video_start_time = time.time()
+
+        def on_record_zoom_event(ev):
+            t = round(max(0.0, time.time() - video_start_time), 2)
+            raw_x = ev.get("x", 640.0)
+            raw_y = ev.get("y", 360.0)
+            ev_type = str(ev.get("type", "in")).lower()
+            event_dict = {
+                "t": t,
+                "x": float(raw_x),
+                "y": float(raw_y),
+                "type": ev_type,
+            }
+            zoom_events.append(event_dict)
+            action_label = "ZOOM-IN" if ev_type == "in" else "ZOOM-OUT"
+            print(f"[{company_name}] >> Captured {action_label} at cursor ({raw_x}, {raw_y}) at t={t}s")
+
+        context.expose_function("__playwright_record_zoom_event", on_record_zoom_event)
+        context.add_init_script(INJECTED_VISUALS_SCRIPT)
+
+        page = context.new_page()
+        _CURRENT_PAGE = page
+
+        print(f"[{company_name}] Opening {url} in visible browser...")
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        except Exception as e:
+            print(f"[{company_name}] Notice during navigation: {e}")
+
+        ShowCallout(
+            "Interactive Recording Active! Press F5 or click [Zoom (F5)] to toggle zoom.",
+            bgColor="#1f6feb",
+            textColor="#ffffff",
+            fade=True,
+            page=page,
+        )
+
+        print("\n" + "=" * 68)
+        print("  INTERACTIVE SCREEN RECORDER RUNNING (F5 ZOOM TEST)")
+        print("=" * 68)
+        print("  - Move your mouse anywhere on the page.")
+        print("  - Press F5 (or click the floating [Zoom (F5)] button at top-right):")
+        print("      * 1st press -> Green pulse ring (marks start of Zoom-In)")
+        print("      * 2nd press -> Orange pulse ring (marks start of Zoom-Out)")
+        print("  - You can press F5 multiple times for multiple zoom intervals!")
+        print("  - To FINISH recording:")
+        print("      * Simply close the browser window, OR")
+        print("      * Press ENTER in this console.")
+        print("=" * 68 + "\n")
+
+        import threading
+        stop_event = threading.Event()
+
+        def wait_for_enter():
+            try:
+                input()
+            except Exception:
+                pass
+            stop_event.set()
+
+        t_input = threading.Thread(target=wait_for_enter, daemon=True)
+        t_input.start()
+
+        while not stop_event.is_set():
+            if page.is_closed():
+                print(f"[{company_name}] Browser window closed by user.")
+                break
+            time.sleep(0.3)
+
+        video_obj = page.video
+
+        _CURRENT_PAGE = None
+        if not page.is_closed():
+            try:
+                page.close()
+            except Exception:
+                pass
+
+        if context:
+            try:
+                context.close()
+            except Exception:
+                pass
+            context = None
+
+        if browser:
+            try:
+                browser.close()
+            except Exception:
+                pass
+            browser = None
+
+        raw_video_path = video_obj.path() if video_obj else None
+        if not raw_video_path or not os.path.exists(raw_video_path):
+            raise FileNotFoundError("Video recording file was not created by Playwright.")
+
+        clean_name = _sanitize_filename(company_name)
+        final_video_path = os.path.join(target_dir, f"{clean_name}.webm")
+
+        if os.path.exists(final_video_path):
+            os.remove(final_video_path)
+
+        os.replace(raw_video_path, final_video_path)
+        abs_final_path = os.path.abspath(final_video_path)
+
+        sidecar_path = None
+        if len(zoom_events) > 0:
+            sidecar_path = f"{abs_final_path}.zoom.json"
+            sidecar_data = {
+                "viewport": {"width": 1280, "height": 720},
+                "fps": 25,
+                "zoom_factor": 2.0,
+                "ramp_sec": 0.5,
+                "events": zoom_events,
+            }
+            with open(sidecar_path, "w", encoding="utf-8") as sf:
+                json.dump(sidecar_data, sf, indent=2)
+            print(f"[{company_name}] Sidecar successfully created with {len(zoom_events)} events: {sidecar_path}")
+        else:
+            print(f"[{company_name}] No F5 zoom events were recorded. Sidecar was not created (per specification).")
+
+        zoomed_path = None
+        if auto_apply_zoom and sidecar_path and os.path.exists(sidecar_path):
+            from apply_zoom import apply_zoom
+            zoomed_path = os.path.join(target_dir, f"{clean_name}.zoomed.webm")
+            print(f"[{company_name}] Applying FFmpeg zoom post-processing...")
+            code, msg = apply_zoom(
+                video_path=abs_final_path,
+                sidecar_path=sidecar_path,
+                output_path=zoomed_path,
+            )
+            if code == 0 and os.path.exists(zoomed_path):
+                print(f"[{company_name}] Zoomed video rendered successfully: {zoomed_path}")
+            else:
+                print(f"[{company_name}] apply_zoom warning: {msg}", file=sys.stderr)
+
+        uploaded_url = None
+        if server_url:
+            try:
+                from video_client import UploadVideo
+                print(f"[{company_name}] Uploading video and sidecar to {server_url}...")
+                uploaded_url = UploadVideo(
+                    server_url=server_url,
+                    video_path=abs_final_path,
+                    company_name=company_name,
+                    sidecar_path=sidecar_path,
+                    auto_process=True,
+                )
+                print(f"[{company_name}] Uploaded! Video URL: {uploaded_url}")
+            except Exception as u_err:
+                print(f"[{company_name}] Server upload notice: {u_err}", file=sys.stderr)
+
+        print(f"[{company_name}] Recording session finished.")
+        return {
+            "video_path": abs_final_path,
+            "sidecar_path": sidecar_path,
+            "zoomed_path": zoomed_path,
+            "events_count": len(zoom_events),
+            "uploaded_url": uploaded_url,
+        }
+
+    except Exception as exc:
+        print(f"[{company_name}] ERROR during interactive recording: {exc}", file=sys.stderr)
         return None
 
     finally:

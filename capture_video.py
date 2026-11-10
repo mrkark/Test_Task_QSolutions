@@ -100,8 +100,22 @@ def main():
     parser.add_argument("--view-seconds", type=float, default=5.0, help="Seconds to preview the video (>0: wait N seconds, 0: wait for Enter)")
     parser.add_argument("--zoom", action="store_true", help="Enable Camtasia-style zoom capture during recording")
     parser.add_argument("--apply-zoom", action="store_true", help="Locally run apply_zoom post-processing before uploading")
+    parser.add_argument("--interactive", "--manual", action="store_true", help="Launch interactive recorder for human operator to test F5 zoom live")
+    parser.add_argument("--url", type=str, default="https://duckduckgo.com", help="Initial URL for interactive recording")
+    parser.add_argument("--name", type=str, default="Manual_Recording", help="Recording / Company name for interactive recording")
 
     args = parser.parse_args()
+
+    if args.interactive:
+        print("[*] Launching interactive manual recorder...")
+        qscript.RecordInteractive(
+            url=args.url,
+            company_name=args.name,
+            auto_apply_zoom=True,
+            server_url=args.server,
+        )
+        return
+
     process_csv(
         csv_filepath=args.csv_file,
         server_url=args.server,

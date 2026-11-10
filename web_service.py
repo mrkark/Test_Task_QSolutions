@@ -506,6 +506,28 @@ def index():
             </form>
         </div>
 
+        <div class="section" style="border-left: 4px solid var(--accent);">
+            <div class="section-title">
+                <span>🎥 Interactive Screen Recorder (Test F5 Zoom Live)</span>
+                <span class="muted">Live operator capture</span>
+            </div>
+            <div style="background: rgba(35, 134, 54, 0.1); border: 1px solid rgba(46, 160, 67, 0.3); border-radius: 6px; padding: 12px; margin-bottom: 12px;">
+                <div style="font-weight: 600; color: #3fb950; margin-bottom: 6px;">Как записать видео с эффектом зума по клавише F5:</div>
+                <ol style="margin: 0; padding-left: 20px; line-height: 1.7; font-size: 13px;">
+                    <li>На хосте Windows запустите скрипт в 1 клик: <code style="background: rgba(0,0,0,0.4); padding: 2px 6px; border-radius: 4px; color: #58a6ff;">record_interactive.bat</code> (или команду <code style="background: rgba(0,0,0,0.4); padding: 2px 6px; border-radius: 4px; color: #58a6ff;">python record_interactive.py</code>).</li>
+                    <li>Откроется видимое окно браузера Chromium с открытым сайтом.</li>
+                    <li>Перемещайте курсор мыши и нажимайте клавишу <b>F5</b> (или кликайте экранную кнопку <b>[Zoom (F5)]</b> в верхнем правом углу) — появится анимированное кольцо и зафиксируется точка курсора. Повторное нажатие F5 плавно возвращает камеру.</li>
+                    <li>Закройте окно браузера — видео и sidecar автоматически сохранятся в папку <code style="background: rgba(0,0,0,0.4); padding: 2px 6px; border-radius: 4px;">./video</code>, обработаются через FFmpeg и загрузятся прямо в этот дашборд!</li>
+                </ol>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <input type="text" id="interactiveUrlInput" placeholder="URL сайта (например: https://duckduckgo.com)" value="https://duckduckgo.com" style="flex: 1; min-width: 260px;">
+                <input type="text" id="interactiveNameInput" placeholder="Имя записи (например: My_F5_Test)" value="My_F5_Test" style="width: 180px;">
+                <button class="btn btn-primary" onclick="launchInteractiveRecord()">Запустить запись</button>
+            </div>
+            <div id="interactiveStatus" style="margin-top: 8px; font-size: 12px;" class="muted"></div>
+        </div>
+
         <div class="section" id="terminalSection" style="display: none;">
             <div class="section-title">
                 <span>Server Response</span>
@@ -700,6 +722,32 @@ def index():
                 showResponse(`<-- Upload failed: ${err}`);
             }
         }
+
+        async function launchInteractiveRecord() {
+            const url = document.getElementById('interactiveUrlInput').value.trim() || 'https://duckduckgo.com';
+            const name = document.getElementById('interactiveNameInput').value.trim() || 'My_F5_Test';
+            const statusEl = document.getElementById('interactiveStatus');
+            statusEl.innerHTML = '<span style="color:#58a6ff;">Запуск... Ожидайте</span>';
+
+            try {
+                const res = await fetch('/record/interactive', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ url: url, company_name: name })
+                });
+                const data = await res.json();
+                if (data.status === 'host_launch_required') {
+                    statusEl.innerHTML = `<span style="color:#f0883e;">ℹ️ ${data.message}</span>`;
+                } else if (data.status === 'completed') {
+                    statusEl.innerHTML = `<span style="color:#3fb950;">✅ Запись завершена! Видео обработано и добавлено в список.</span>`;
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    statusEl.innerHTML = `<span style="color:#f85149;">${data.error || JSON.stringify(data)}</span>`;
+                }
+            } catch (err) {
+                statusEl.innerHTML = `<span style="color:#f0883e;">ℹ️ Сервер запущен в контейнере Docker. Для записи с окном браузера на Windows запустите <b>record_interactive.bat</b></span>`;
+            }
+        }
     </script>
 </body>
 </html>"""
@@ -876,6 +924,35 @@ def list_videos():
         rows.append(item)
 
     return jsonify(rows), 200
+
+
+@app.route("/record/interactive", methods=["POST"])
+def record_interactive_endpoint():
+    data = request.get_json(silent=True) or {}
+    url = data.get("url") or "https://duckduckgo.com"
+    company_name = data.get("company_name") or "Operator_Recording"
+
+    # If running inside Docker without an X11 / Wayland DISPLAY, visible browser cannot be opened inside container
+    if not os.environ.get("DISPLAY") and sys.platform.startswith("linux"):
+        return jsonify({
+            "status": "host_launch_required",
+            "message": "Контейнер Docker работает в headless-режиме (без графического дисплея). Для интерактивной записи с окном браузера запустите 'record_interactive.bat' или 'python record_interactive.py' на хосте Windows!"
+        }), 200
+
+    try:
+        import qscript
+        res = qscript.RecordInteractive(
+            url=url,
+            company_name=company_name,
+            auto_apply_zoom=True,
+            server_url=request.host_url.rstrip("/"),
+        )
+        return jsonify({
+            "status": "completed",
+            "result": res,
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 try:
