@@ -13,3 +13,5 @@ video/*.zoom.json
 !video/Alpha_Magento_Solutions.webm.zoom.json
 !video/Alpha_Magento_Solutions.webp
 !video/Operator_Zoom_Test.webm.zoom.json
+!video/test.webm.zoom.json
+!video/test_1.webm.zoom.json
