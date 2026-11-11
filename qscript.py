@@ -640,7 +640,7 @@ def CaptureVideo_Magento(
         video_obj = page.video
 
         session_end_time = time.time()
-        total_wall_time = session_end_time - session_start_time
+        total_wall_time = session_end_time - session_start_epoch
 
         _CURRENT_PAGE = None
         context.close()

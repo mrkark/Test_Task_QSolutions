@@ -270,4 +270,16 @@ class TestWebService(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    import sys
+    # Support --server <URL> or --server=<URL> CLI parameter
+    for i in range(len(sys.argv) - 1, -1, -1):
+        if sys.argv[i].startswith("--server="):
+            SERVER_URL = sys.argv[i].split("=", 1)[1].rstrip("/")
+            sys.argv.pop(i)
+            break
+        elif sys.argv[i] == "--server" and i + 1 < len(sys.argv):
+            SERVER_URL = sys.argv[i + 1].rstrip("/")
+            sys.argv.pop(i + 1)
+            sys.argv.pop(i)
+            break
     unittest.main()
