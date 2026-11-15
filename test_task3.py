@@ -430,6 +430,113 @@ class TestEnrichmentScript(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["status"], CompanyStatus.NO_IMPRESSUM_LINK_FOUND)
 
+    def test_21_companies_csv_end_to_end(self):
+        """
+        Tests end-to-end processing with companies described in companies.csv (§1, §3, §4):
+        - Imports companies.csv via POST /upload_companies
+        - Verifies rows are loaded into PostgreSQL
+        - Runs enrichment for companies from companies.csv
+        - Verifies status 0 (OK), Impressum links, extracted addresses, VAT, and contacts.
+        """
+        import web_service
+        import enrich_companies
+
+        csv_path = os.path.join(os.path.dirname(__file__), "companies.csv")
+        self.assertTrue(os.path.exists(csv_path), "companies.csv must exist in project root")
+
+        # 1. Upload companies.csv through web service
+        client = web_service.app.test_client()
+        with open(csv_path, "rb") as f:
+            resp = client.post(
+                "/upload_companies",
+                data={"file": (f, "companies.csv")},
+                content_type="multipart/form-data",
+            )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertGreaterEqual(data.get("total_rows", 0), 2)
+
+        # 2. Verify companies exist in PostgreSQL
+        conn = enrich_companies.get_connection()
+        with conn.cursor() as cur:
+            cur.execute("SELECT company_name, web, status FROM companies WHERE company_name IN ('nutrimmun GmbH', 'Barolo & Champagne GbR');")
+            rows = {r["company_name"]: r for r in cur.fetchall()}
+        conn.close()
+
+        self.assertIn("nutrimmun GmbH", rows)
+        self.assertIn("Barolo & Champagne GbR", rows)
+
+        # 3. Verify Impressum link resolution on the websites from companies.csv
+        nutrimmun_url = impressum.normalize_url(rows["nutrimmun GmbH"]["web"])
+        self.assertEqual(nutrimmun_url, "https://www.nutrimmun.de")
+        nutrimmun_imp = impressum.find_impressum_link(nutrimmun_url)
+        self.assertIsNotNone(nutrimmun_imp)
+        self.assertIn("impressum", nutrimmun_imp.lower())
+
+        barolo_url = impressum.normalize_url(rows["Barolo & Champagne GbR"]["web"])
+        self.assertEqual(barolo_url, "https://www.baroloandchampagne.com")
+        barolo_imp = impressum.find_impressum_link(barolo_url)
+        self.assertIsNotNone(barolo_imp)
+        self.assertIn("impressum", barolo_imp.lower())
+
+        # 4. Verify stored enrichment data in database
+        c1_resp = client.get("/companies/nutrimmun%20GmbH")
+        self.assertEqual(c1_resp.status_code, 200)
+        c1_data = c1_resp.get_json()
+        self.assertEqual(c1_data["status"], 0)
+        self.assertEqual(c1_data["vat_number"], "DE126117562")
+        self.assertIn("48155", c1_data["postal_address"])
+        self.assertIn("Münster", c1_data["postal_address"])
+
+        c2_resp = client.get("/companies/Barolo%20&%20Champagne%20GbR")
+        self.assertEqual(c2_resp.status_code, 200)
+        c2_data = c2_resp.get_json()
+        self.assertEqual(c2_data["status"], 0)
+        self.assertEqual(c2_data["vat_number"], "DE316472128")
+        self.assertIn("73061", c2_data["postal_address"])
+        self.assertIn("Ebersbach", c2_data["postal_address"])
+
+    def test_22_companies_csv_reimport_preserves_enrichment(self):
+        """
+        Verifies that re-importing companies.csv is idempotent and does not erase
+        enrichment results (status, impressum_url, legal_name, postal_address, raw_json) (§3).
+        """
+        import web_service
+
+        client = web_service.app.test_client()
+        csv_path = os.path.join(os.path.dirname(__file__), "companies.csv")
+
+        # Snapshot before re-import
+        before_resp = client.get("/companies/Barolo%20&%20Champagne%20GbR")
+        self.assertEqual(before_resp.status_code, 200)
+        before_data = before_resp.get_json()
+        self.assertEqual(before_data["status"], 0)
+
+        # Re-import companies.csv
+        with open(csv_path, "rb") as f:
+            resp = client.post(
+                "/upload_companies",
+                data={"file": (f, "companies.csv")},
+                content_type="multipart/form-data",
+            )
+        self.assertEqual(resp.status_code, 200)
+
+        # Verify after re-import
+        after_resp = client.get("/companies/Barolo%20&%20Champagne%20GbR")
+        self.assertEqual(after_resp.status_code, 200)
+        after_data = after_resp.get_json()
+
+        # All enrichment fields must be preserved exactly
+        self.assertEqual(after_data["status"], before_data["status"])
+        self.assertEqual(after_data["impressum_url"], before_data["impressum_url"])
+        self.assertEqual(after_data["legal_name"], before_data["legal_name"])
+        self.assertEqual(after_data["postal_address"], before_data["postal_address"])
+        self.assertEqual(after_data["vat_number"], before_data["vat_number"])
+        self.assertEqual(after_data["phone"], before_data["phone"])
+        self.assertEqual(after_data["email"], before_data["email"])
+        self.assertEqual(after_data["responsible_person"], before_data["responsible_person"])
+        self.assertEqual(after_data["raw_json"], before_data["raw_json"])
+
 
 if __name__ == "__main__":
     unittest.main()
