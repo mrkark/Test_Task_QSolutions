@@ -13,7 +13,7 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-echo [1/2] Running Zoom Logic Tests (pytest)...
+echo [1/3] Running Zoom Logic Tests (pytest)...
 pytest test_zoom.py -v
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Zoom logic tests failed!
@@ -22,7 +22,16 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo.
-echo [2/2] Running Web Service Integration Tests...
+echo [2/3] Running Task 3 Impressum & DeepSeek Tests (unittest)...
+python -m unittest test_task3.py -v
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] Task 3 tests failed!
+    pause
+    exit /b %ERRORLEVEL%
+)
+
+echo.
+echo [3/3] Running Web Service Video Integration Tests...
 python test_service.py -v
 
 echo.

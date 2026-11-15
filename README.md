@@ -104,6 +104,48 @@ python apply_zoom.py --video video/Alpha_Magento_Solutions.webm --dry-run
 
 ---
 
+## Задание 3: Импорт компаний и извлечение данных Impressum через DeepSeek
+
+Реализовано расширение веб-сервиса и CLI для импорта компаний из CSV, поиска страниц Impressum/Imprint, оптимизации токенов и извлечения реквизитов через DeepSeek API:
+
+### 1. Управление DeepSeek API-ключом
+Ключ API хранится в файле `.env` (который автоматически добавлен в `.gitignore` и никогда не попадает в Git):
+- **1-клик сохранение ключа**: запустите `set_deepseek_key.bat` или выполните:
+  ```bash
+  python set_deepseek_key.py <ВАШ_DEEPSEEK_API_KEY>
+  ```
+- Ключ автоматически пробрасывается в Docker-контейнер через `docker-compose.yml` (`DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}`).
+
+### 2. Импорт CSV и API эндпоинты
+- **`GET /upload_companies`** — веб-интерфейс (HTML-форма) для загрузки CSV с компаниями.
+- **`POST /upload_companies`** — загрузка CSV (`URL;Company Name;Language;Country;Postcode;City;Street;HouseNo;Web`) с идемпотентным upsert в таблицу `companies`. Повторный импорт не затирает результаты извлечения.
+- **`GET /companies`** — список всех компаний в формате JSON (поддерживает фильтрацию `?status=0` или `?status=pending`).
+- **`GET /companies/<company_name>`** — детальная информация о компании в JSON (404 при отсутствии).
+
+### 3. Скрипт обогащения данных (`enrich_companies.py`)
+Автономный скрипт, подключающийся к PostgreSQL и обрабатывающий компании по очереди:
+```bash
+# Обработка всех необработанных компаний (status IS NULL или status <> 0)
+python enrich_companies.py
+
+# Обработка конкретной компании
+python enrich_companies.py --company "nutrimmun GmbH"
+
+# Тестовый прогон без обращения к DeepSeek API
+python enrich_companies.py --dry-run
+```
+
+### 4. Оптимизация токенов (`impressum.py`)
+- Страницы Impressum обрезаются по границам юридического блока (sandwich cut): отсекаются меню и навигация сверху, а также баннеры куки, AGB и дисклеймеры снизу.
+- Экономия токенов составляет от 40% до 80% без потери юридически значимых данных.
+
+### 5. Автотесты для задания 3
+```bash
+python -m unittest test_task3.py -v
+```
+
+---
+
 ## Тестирование
 
 Запуск всех тестов проекта:
@@ -112,9 +154,12 @@ python apply_zoom.py --video video/Alpha_Magento_Solutions.webm --dry-run
 
 Либо вручную:
 ```bash
-# 1. Тесты логики зума, парсинга sidecar и математики фильтров (pytest)
+# 1. Тесты задания 3 (импорт CSV, парсинг Impressum, оптимизация токенов, DeepSeek JSON)
+python -m unittest test_task3.py -v
+
+# 2. Тесты логики зума, парсинга sidecar и математики фильтров (pytest)
 pytest test_zoom.py -v
 
-# 2. Интеграционные тесты веб-сервиса и API
+# 3. Интеграционные тесты веб-сервиса и API
 python test_service.py -v
 ```

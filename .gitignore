@@ -1,5 +1,9 @@
 __pycache__/
 *.pyc
+.env
+*.env
+.venv/
+venv/
 TEST_TASK_v2.pdf
 dist/
 build/

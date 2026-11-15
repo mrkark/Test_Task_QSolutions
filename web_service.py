@@ -1,16 +1,21 @@
 import os
+import io
 import re
+import csv
 import time
 from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory, g, render_template_string
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from dotenv import load_dotenv
 from apply_zoom import apply_zoom, find_sidecar
+
+load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.environ.get("UPLOAD_FOLDER", os.path.join(BASE_DIR, "uploads"))
 
-DB_HOST = os.environ.get("DB_HOST", "db")
+DB_HOST = os.environ.get("DB_HOST", "localhost")
 DB_PORT = int(os.environ.get("DB_PORT", "5432"))
 DB_NAME = os.environ.get("DB_NAME", "videos")
 DB_USER = os.environ.get("DB_USER", "video_user")
@@ -71,6 +76,31 @@ def init_db():
                 );
                 ALTER TABLE videos ADD COLUMN IF NOT EXISTS processed_video_url TEXT;
                 ALTER TABLE videos ADD COLUMN IF NOT EXISTS sidecar_path TEXT;
+
+                CREATE TABLE IF NOT EXISTS companies (
+                    id SERIAL PRIMARY KEY,
+                    company_name TEXT NOT NULL UNIQUE,
+                    language TEXT,
+                    country TEXT,
+                    postcode TEXT,
+                    city TEXT,
+                    street TEXT,
+                    house_no TEXT,
+                    web TEXT,
+                    status INTEGER,
+                    impressum_url TEXT,
+                    legal_name TEXT,
+                    postal_address TEXT,
+                    handelsregister TEXT,
+                    vat_number TEXT,
+                    phone TEXT,
+                    email TEXT,
+                    responsible_person TEXT,
+                    raw_json JSONB,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_companies_status ON companies (status);
                 """
             )
         conn.commit()
@@ -453,7 +483,9 @@ def index():
                 <h1><span class="status-dot"></span>Video Service (Apache + PostgreSQL + Zoom Engine)</h1>
                 <span class="muted">Containerized video registry with Camtasia-style FFmpeg zoompan processing</span>
             </div>
-            <div style="display: flex; gap: 8px;">
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <a class="btn btn-sm btn-purple" href="/upload_companies">📥 Import CSV (/upload_companies)</a>
+                <a class="btn btn-sm" href="/companies" target="_blank">🏢 Companies JSON (/companies)</a>
                 <button class="btn btn-sm btn-blue" onclick="syncLocalVideos()">🔄 Sync Videos (/sync)</button>
                 <button class="btn btn-sm" onclick="fetchRecords()">List Records (/videos)</button>
             </div>
@@ -1006,6 +1038,243 @@ def list_videos():
         rows.append(item)
 
     return jsonify(rows), 200
+
+
+@app.route("/upload_companies", methods=["GET"])
+def upload_companies_form():
+    """Renders tiny HTML form for CSV upload per §3."""
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload Companies CSV</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            background: #0d1117;
+            color: #f0f6fc;
+            padding: 32px 16px;
+            margin: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        h2 { margin-top: 0; font-size: 20px; color: #58a6ff; }
+        p { color: #8b949e; font-size: 14px; line-height: 1.5; }
+        .form-group { margin: 20px 0; }
+        label { display: block; margin-bottom: 8px; font-weight: 500; font-size: 13px; color: #c9d1d9; }
+        input[type="file"] {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            color: #f0f6fc;
+            box-sizing: border-box;
+        }
+        .btn {
+            background: #238636;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn:hover { background: #2ea043; }
+        .links {
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid #30363d;
+            display: flex;
+            gap: 16px;
+            font-size: 13px;
+        }
+        .links a { color: #58a6ff; text-decoration: none; }
+        .links a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Import Companies CSV (Task 3)</h2>
+        <p>Upload a semicolon-delimited CSV file (<code>URL;Company Name;Language;Country;Postcode;City;Street;HouseNo;Web</code>) to import or update companies in PostgreSQL.</p>
+        <form method="POST" action="/upload_companies" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="file">Select CSV file:</label>
+                <input type="file" id="file" name="file" accept=".csv" required>
+            </div>
+            <button type="submit" class="btn">Upload &amp; Import</button>
+        </form>
+        <div class="links">
+            <a href="/companies">List All Companies (/companies)</a>
+            <a href="/">Video Dashboard</a>
+        </div>
+    </div>
+</body>
+</html>"""
+    return render_template_string(html)
+
+
+@app.route("/upload_companies", methods=["POST"])
+def upload_companies():
+    """
+    Imports/upserts companies from a semicolon-delimited CSV (§3).
+    - multipart/form-data with a single file field.
+    - Read with csv.DictReader(..., delimiter=";", quotechar='"').
+    - For each row: upsert by company_name (ON CONFLICT DO UPDATE).
+    - On upsert, update only CSV-provided columns (language, country, postcode, city, street, house_no, web, updated_at).
+    - NEVER overwrite enrichment results (status, impressum_url, legal_name, postal_address, etc.).
+    - Returns JSON: {"imported": N, "updated": M, "total_rows": K}.
+    """
+    if "file" not in request.files:
+        return jsonify({"error": "No file field in request"}), 400
+
+    uploaded_file = request.files["file"]
+    if not uploaded_file or not uploaded_file.filename:
+        return jsonify({"error": "Empty or missing file"}), 400
+
+    try:
+        raw_bytes = uploaded_file.read()
+        text_stream = io.StringIO(raw_bytes.decode("utf-8-sig", errors="replace"))
+        reader = csv.DictReader(text_stream, delimiter=";", quotechar='"')
+    except Exception as read_err:
+        return jsonify({"error": f"Failed to read CSV: {read_err}"}), 400
+
+    db = get_db()
+    imported_count = 0
+    updated_count = 0
+    total_rows = 0
+
+    with db.cursor() as cur:
+        for row in reader:
+            if not row:
+                continue
+            row_clean = {str(k).strip(): (str(v).strip() if v is not None else "") for k, v in row.items() if k is not None}
+            company_name = (
+                row_clean.get("Company Name")
+                or row_clean.get("company_name")
+                or row_clean.get("Company")
+                or row_clean.get("company")
+            )
+            if not company_name:
+                continue
+
+            total_rows += 1
+            web = row_clean.get("Web") or row_clean.get("web") or None
+            language = row_clean.get("Language") or row_clean.get("language") or None
+            country = row_clean.get("Country") or row_clean.get("country") or None
+            postcode = row_clean.get("Postcode") or row_clean.get("postcode") or None
+            city = row_clean.get("City") or row_clean.get("city") or None
+            street = row_clean.get("Street") or row_clean.get("street") or None
+            house_no = row_clean.get("HouseNo") or row_clean.get("house_no") or None
+
+            cur.execute(
+                """
+                INSERT INTO companies (
+                    company_name, language, country, postcode, city, street, house_no, web, created_at, updated_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW()
+                )
+                ON CONFLICT (company_name) DO UPDATE SET
+                    language = COALESCE(EXCLUDED.language, companies.language),
+                    country = COALESCE(EXCLUDED.country, companies.country),
+                    postcode = COALESCE(EXCLUDED.postcode, companies.postcode),
+                    city = COALESCE(EXCLUDED.city, companies.city),
+                    street = COALESCE(EXCLUDED.street, companies.street),
+                    house_no = COALESCE(EXCLUDED.house_no, companies.house_no),
+                    web = COALESCE(EXCLUDED.web, companies.web),
+                    updated_at = NOW()
+                RETURNING (xmax = 0) AS inserted;
+                """,
+                (company_name, language, country, postcode, city, street, house_no, web),
+            )
+            res = cur.fetchone()
+            if res and res["inserted"]:
+                imported_count += 1
+            else:
+                updated_count += 1
+
+    db.commit()
+
+    return jsonify({
+        "imported": imported_count,
+        "updated": updated_count,
+        "total_rows": total_rows,
+    }), 200
+
+
+@app.route("/companies", methods=["GET"])
+def list_companies():
+    """
+    Returns an array of all companies in PostgreSQL (JSON) per §3.
+    Optionally ?status=N to filter by status code.
+    ?status=null or ?status=pending filters for status IS NULL.
+    """
+    status_filter = request.args.get("status")
+    db = get_db()
+    with db.cursor() as cur:
+        if status_filter is not None and str(status_filter).strip():
+            val = str(status_filter).strip().lower()
+            if val in ("null", "none", "pending"):
+                cur.execute(
+                    "SELECT * FROM companies WHERE status IS NULL ORDER BY id ASC;"
+                )
+            else:
+                try:
+                    status_int = int(val)
+                    cur.execute(
+                        "SELECT * FROM companies WHERE status = %s ORDER BY id ASC;",
+                        (status_int,),
+                    )
+                except ValueError:
+                    return jsonify({"error": f"Invalid status parameter: {status_filter}"}), 400
+        else:
+            cur.execute("SELECT * FROM companies ORDER BY id ASC;")
+
+        raw_rows = cur.fetchall()
+
+    rows = []
+    for r in raw_rows:
+        item = dict(r)
+        if "created_at" in item and hasattr(item["created_at"], "strftime"):
+            item["created_at"] = item["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+        if "updated_at" in item and hasattr(item["updated_at"], "strftime"):
+            item["updated_at"] = item["updated_at"].strftime("%Y-%m-%d %H:%M:%S")
+        rows.append(item)
+
+    return jsonify(rows), 200
+
+
+@app.route("/companies/<path:company_name>", methods=["GET"])
+def get_company(company_name):
+    """Returns single company by company_name as JSON (404 if not found)."""
+    db = get_db()
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT * FROM companies WHERE company_name = %s;",
+            (company_name,),
+        )
+        row = cur.fetchone()
+
+    if not row:
+        return jsonify({"error": f"Company '{company_name}' not found"}), 404
+
+    item = dict(row)
+    if "created_at" in item and hasattr(item["created_at"], "strftime"):
+        item["created_at"] = item["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+    if "updated_at" in item and hasattr(item["updated_at"], "strftime"):
+        item["updated_at"] = item["updated_at"].strftime("%Y-%m-%d %H:%M:%S")
+
+    return jsonify(item), 200
 
 
 @app.route("/record/interactive", methods=["POST"])
