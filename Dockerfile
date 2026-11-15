@@ -26,7 +26,7 @@ COPY apache.conf /etc/apache2/sites-available/000-default.conf
 COPY . .
 
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 RUN mkdir -p /app/uploads \
     && chown -R www-data:www-data /app \

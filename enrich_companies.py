@@ -23,21 +23,27 @@ from impressum import CompanyStatus
 load_dotenv()
 
 # PostgreSQL connection defaults (matches Task 1 container & local setups)
-DB_HOST = os.environ.get("DB_HOST", "localhost")
-DB_PORT = int(os.environ.get("DB_PORT", "5432"))
-DB_NAME = os.environ.get("DB_NAME", "videos")
-DB_USER = os.environ.get("DB_USER", "video_user")
-DB_PASSWORD = os.environ.get("DB_PASSWORD", "video_pass")
+DEFAULT_DB_HOST = os.environ.get("DB_HOST", "localhost")
+DEFAULT_DB_PORT = int(os.environ.get("DB_PORT", "5432"))
+DEFAULT_DB_NAME = os.environ.get("DB_NAME", "videos")
+DEFAULT_DB_USER = os.environ.get("DB_USER", "video_user")
+DEFAULT_DB_PASSWORD = os.environ.get("DB_PASSWORD", "video_pass")
 
 
-def get_connection():
-    """Connects to PostgreSQL using Task 1 settings."""
+def get_connection(
+    host: str = None,
+    port: int = None,
+    dbname: str = None,
+    user: str = None,
+    password: str = None,
+):
+    """Connects to PostgreSQL using configured parameters or environment variables."""
     return psycopg2.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASSWORD,
+        host=host or os.environ.get("DB_HOST", DEFAULT_DB_HOST),
+        port=int(port or os.environ.get("DB_PORT", DEFAULT_DB_PORT)),
+        dbname=dbname or os.environ.get("DB_NAME", DEFAULT_DB_NAME),
+        user=user or os.environ.get("DB_USER", DEFAULT_DB_USER),
+        password=password or os.environ.get("DB_PASSWORD", DEFAULT_DB_PASSWORD),
         cursor_factory=RealDictCursor,
     )
 
@@ -84,6 +90,11 @@ def enrich_companies(
     api_key: str = None,
     model: str = None,
     dry_run: bool = False,
+    db_host: str = None,
+    db_port: int = None,
+    db_name: str = None,
+    db_user: str = None,
+    db_password: str = None,
 ) -> list:
     """
     Main enrichment routine iterating companies in order of id (§4):
@@ -94,15 +105,25 @@ def enrich_companies(
     - 4.5 Call DeepSeek (§6)
     - 4.6 Decide status & write back to PostgreSQL
     """
-    conn = get_connection()
+    conn = get_connection(
+        host=db_host,
+        port=db_port,
+        dbname=db_name,
+        user=db_user,
+        password=db_password,
+    )
     ensure_table_exists(conn)
 
+    effective_host = db_host or os.environ.get("DB_HOST", DEFAULT_DB_HOST)
+    effective_port = db_port or os.environ.get("DB_PORT", DEFAULT_DB_PORT)
+    effective_dbname = db_name or os.environ.get("DB_NAME", DEFAULT_DB_NAME)
+    effective_user = db_user or os.environ.get("DB_USER", DEFAULT_DB_USER)
     effective_api_key = api_key or os.environ.get("DEEPSEEK_API_KEY")
 
     print("=" * 76)
     print("  QSolutions: Company Impressum / Imprint Enrichment with DeepSeek")
     print("=" * 76)
-    print(f"  Database:        {DB_HOST}:{DB_PORT}/{DB_NAME} (user: {DB_USER})")
+    print(f"  Database:        {effective_host}:{effective_port}/{effective_dbname} (user: {effective_user})")
     print(f"  DeepSeek Model:  {model or os.environ.get('DEEPSEEK_MODEL', 'deepseek-chat')}")
     print(f"  API Key Present: {'YES' if effective_api_key else 'NO (DEEPSEEK_API_KEY unset)'}")
     print(f"  Dry Run:         {'YES' if dry_run else 'NO'}")
@@ -323,6 +344,11 @@ def main():
     parser.add_argument("--api-key", type=str, default=None, help="DeepSeek API Key (defaults to DEEPSEEK_API_KEY env)")
     parser.add_argument("--model", type=str, default=None, help="DeepSeek model name (default: deepseek-chat)")
     parser.add_argument("--dry-run", action="store_true", help="Fetch & optimize text without calling DeepSeek or writing to DB")
+    parser.add_argument("--db-host", type=str, default=None, help="PostgreSQL host (defaults to DB_HOST env or localhost)")
+    parser.add_argument("--db-port", type=int, default=None, help="PostgreSQL port (defaults to DB_PORT env or 5432)")
+    parser.add_argument("--db-name", type=str, default=None, help="PostgreSQL database name (defaults to DB_NAME env or videos)")
+    parser.add_argument("--db-user", type=str, default=None, help="PostgreSQL username (defaults to DB_USER env or video_user)")
+    parser.add_argument("--db-password", type=str, default=None, help="PostgreSQL password (defaults to DB_PASSWORD env or video_pass)")
 
     args = parser.parse_args()
 
@@ -334,6 +360,11 @@ def main():
         api_key=args.api_key,
         model=args.model,
         dry_run=args.dry_run,
+        db_host=args.db_host,
+        db_port=args.db_port,
+        db_name=args.db_name,
+        db_user=args.db_user,
+        db_password=args.db_password,
     )
 
 

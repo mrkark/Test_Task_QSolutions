@@ -29,11 +29,11 @@ if sys.stdout.encoding != "utf-8":
     except Exception:
         pass
 
-DB_HOST = os.environ.get("DB_HOST", "localhost")
-DB_PORT = int(os.environ.get("DB_PORT", "5432"))
-DB_NAME = os.environ.get("DB_NAME", "videos")
-DB_USER = os.environ.get("DB_USER", "video_user")
-DB_PASSWORD = os.environ.get("DB_PASSWORD", "video_pass")
+DEFAULT_DB_HOST = os.environ.get("DB_HOST", "localhost")
+DEFAULT_DB_PORT = int(os.environ.get("DB_PORT", "5432"))
+DEFAULT_DB_NAME = os.environ.get("DB_NAME", "videos")
+DEFAULT_DB_USER = os.environ.get("DB_USER", "video_user")
+DEFAULT_DB_PASSWORD = os.environ.get("DB_PASSWORD", "video_pass")
 
 STATUS_NAMES = {
     None: "PENDING (NULL)",
@@ -46,19 +46,19 @@ STATUS_NAMES = {
 }
 
 
-def get_connection():
+def get_connection(host=None, port=None, dbname=None, user=None, password=None):
     return psycopg2.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASSWORD,
+        host=host or os.environ.get("DB_HOST", DEFAULT_DB_HOST),
+        port=int(port or os.environ.get("DB_PORT", DEFAULT_DB_PORT)),
+        dbname=dbname or os.environ.get("DB_NAME", DEFAULT_DB_NAME),
+        user=user or os.environ.get("DB_USER", DEFAULT_DB_USER),
+        password=password or os.environ.get("DB_PASSWORD", DEFAULT_DB_PASSWORD),
         cursor_factory=RealDictCursor,
     )
 
 
-def fetch_companies(company_filter=None, status_filter=None):
-    conn = get_connection()
+def fetch_companies(company_filter=None, status_filter=None, host=None, port=None, dbname=None, user=None, password=None):
+    conn = get_connection(host=host, port=port, dbname=dbname, user=user, password=password)
     try:
         with conn.cursor() as cur:
             query = "SELECT * FROM companies "
@@ -154,13 +154,30 @@ def main():
     parser.add_argument("--status", "-s", help="Filter by status code (e.g. 0, 1, 2, 3, 4, 5, or pending/null)")
     parser.add_argument("--detail", "-d", action="store_true", help="Show detailed view of all matched companies")
     parser.add_argument("--json", action="store_true", help="Output JSON format")
+    parser.add_argument("--db-host", type=str, default=None, help="PostgreSQL host (defaults to DB_HOST env or localhost)")
+    parser.add_argument("--db-port", type=int, default=None, help="PostgreSQL port (defaults to DB_PORT env or 5432)")
+    parser.add_argument("--db-name", type=str, default=None, help="PostgreSQL database name (defaults to DB_NAME env or videos)")
+    parser.add_argument("--db-user", type=str, default=None, help="PostgreSQL username (defaults to DB_USER env or video_user)")
+    parser.add_argument("--db-password", type=str, default=None, help="PostgreSQL password (defaults to DB_PASSWORD env or video_pass)")
 
     args = parser.parse_args()
 
+    effective_host = args.db_host or os.environ.get("DB_HOST", DEFAULT_DB_HOST)
+    effective_port = args.db_port or os.environ.get("DB_PORT", DEFAULT_DB_PORT)
+    effective_dbname = args.db_name or os.environ.get("DB_NAME", DEFAULT_DB_NAME)
+
     try:
-        rows = fetch_companies(company_filter=args.company, status_filter=args.status)
+        rows = fetch_companies(
+            company_filter=args.company,
+            status_filter=args.status,
+            host=args.db_host,
+            port=args.db_port,
+            dbname=args.db_name,
+            user=args.db_user,
+            password=args.db_password,
+        )
     except Exception as exc:
-        print(f"[ERROR] Could not connect to PostgreSQL at {DB_HOST}:{DB_PORT}/{DB_NAME}: {exc}")
+        print(f"[ERROR] Could not connect to PostgreSQL at {effective_host}:{effective_port}/{effective_dbname}: {exc}")
         sys.exit(1)
 
     if args.json:
