@@ -317,16 +317,19 @@ def enrich_companies(
 
     conn.close()
 
-    print("=" * 76)
+    print("=" * 115)
     print("  ENRICHMENT BATCH SUMMARY:")
-    print("=" * 76)
+    print("=" * 115)
+    print(f" {'#':<4} | {'Company Name':<24} | {'Status':<14} | {'PostalCode':<10} | {'City':<16} | {'Street':<20} | {'HouseNo':<8}")
+    print("=" * 115)
     for r in results:
         st = r.get("status_name", str(r.get("status")))
-        addr_summary = r.get('address') or r.get('error', '')
-        if r.get("postcode") and r.get("city"):
-            addr_summary = f"{r.get('street')} {r.get('house_no')}, {r.get('postcode')} {r.get('city')}"
-        print(f"  #{r['id']:<3} {r['name']:<28} [{st:<18}] {addr_summary}")
-    print("=" * 76 + "\n")
+        postcode = (r.get("postcode") or "-")[:10]
+        city = (r.get("city") or "-")[:16]
+        street = (r.get("street") or "-")[:20]
+        house_no = (r.get("house_no") or "-")[:8]
+        print(f" #{r['id']:<3} | {r['name'][:24]:<24} | {st[:14]:<14} | {postcode:<10} | {city:<16} | {street:<20} | {house_no:<8}")
+    print("=" * 115 + "\n")
     return results
 
 

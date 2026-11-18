@@ -90,9 +90,9 @@ def print_table(rows):
         print("\n[!] No companies found in PostgreSQL.")
         return
 
-    print("\n" + "=" * 140)
-    print(f" {'ID':<4} | {'Company Name':<22} | {'Status':<16} | {'Street & HouseNo':<24} | {'Postcode & City':<22} | {'VAT / Register'}")
-    print("=" * 140)
+    print("\n" + "=" * 145)
+    print(f" {'ID':<4} | {'Company Name':<22} | {'Status':<14} | {'PostalCode':<10} | {'City':<16} | {'Street':<20} | {'HouseNo':<8} | {'VAT Number':<14} | {'Register'}")
+    print("=" * 145)
 
     status_counts = {}
     for r in rows:
@@ -102,25 +102,21 @@ def print_table(rows):
 
         cid = str(r["id"])
         cname = (r["company_name"] or "")[:22]
-        cstatus = st_name[:16]
+        cstatus = st_name[:14]
+        postcode = (r.get("postcode") or "-")[:10]
+        city = (r.get("city") or "-")[:16]
+        street = (r.get("street") or "-")[:20]
+        house_no = (r.get("house_no") or "-")[:8]
+        vat_no = (r.get("vat_number") or "-")[:14]
+        reg_no = (r.get("handelsregister") or "-")[:16]
 
-        street_no = " ".join(filter(None, [r.get("street"), r.get("house_no")])) or "-"
-        post_city = " ".join(filter(None, [r.get("postcode"), r.get("city")])) or "-"
+        print(f" {cid:<4} | {cname:<22} | {cstatus:<14} | {postcode:<10} | {city:<16} | {street:<20} | {house_no:<8} | {vat_no:<14} | {reg_no}")
 
-        cvat_reg = []
-        if r.get("vat_number"):
-            cvat_reg.append(r["vat_number"])
-        if r.get("handelsregister"):
-            cvat_reg.append(r["handelsregister"])
-        extra = ", ".join(cvat_reg) if cvat_reg else "-"
-
-        print(f" {cid:<4} | {cname:<22} | {cstatus:<16} | {street_no[:24]:<24} | {post_city[:22]:<22} | {extra}")
-
-    print("=" * 140)
+    print("=" * 145)
     print(f"Total companies in PostgreSQL: {len(rows)}")
     summary_parts = [f"{k}: {v}" for k, v in sorted(status_counts.items())]
     print(f"Breakdown: {', '.join(summary_parts)}")
-    print("=" * 140 + "\n")
+    print("=" * 145 + "\n")
 
 
 def print_detail_card(r):
