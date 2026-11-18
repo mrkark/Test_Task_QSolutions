@@ -183,6 +183,11 @@ class TestImpressumUnit(unittest.TestCase):
         self.assertEqual(fields["legal_name"], "nutrimmun GmbH")
         self.assertIn("Am Mittelhafen 56", fields["postal_address"])
         self.assertIn("48155 Münster", fields["postal_address"])
+        self.assertEqual(fields["postcode"], "48155")
+        self.assertEqual(fields["city"], "Münster")
+        self.assertEqual(fields["street"], "Am Mittelhafen")
+        self.assertEqual(fields["house_no"], "56")
+        self.assertEqual(fields["country"], "Deutschland")
         self.assertEqual(fields["vat_number"], "DE126117562")
 
     def test_10_evaluate_extraction_status_address_incomplete(self):
@@ -385,6 +390,11 @@ class TestEnrichmentScript(unittest.TestCase):
         self.assertEqual(c_data["status"], 0)
         self.assertEqual(c_data["vat_number"], "DE126117562")
         self.assertIsNotNone(c_data["impressum_url"])
+        # Verify individual parsed address columns in PostgreSQL
+        self.assertEqual(c_data["postcode"], "48155")
+        self.assertEqual(c_data["city"], "Münster")
+        self.assertEqual(c_data["street"], "Am Mittelhafen")
+        self.assertEqual(c_data["house_no"], "56")
 
     def test_19_enrich_empty_website(self):
         """Tests status 5 (NO_WEBSITE) when web column is empty (§4.1)."""
@@ -487,6 +497,10 @@ class TestEnrichmentScript(unittest.TestCase):
         self.assertEqual(c1_data["vat_number"], "DE126117562")
         self.assertIn("48155", c1_data["postal_address"])
         self.assertIn("Münster", c1_data["postal_address"])
+        self.assertEqual(c1_data["postcode"], "48155")
+        self.assertEqual(c1_data["city"], "Münster")
+        self.assertEqual(c1_data["street"], "Am Mittelhafen")
+        self.assertEqual(c1_data["house_no"], "56")
 
         c2_resp = client.get("/companies/Barolo%20&%20Champagne%20GbR")
         self.assertEqual(c2_resp.status_code, 200)
@@ -495,6 +509,10 @@ class TestEnrichmentScript(unittest.TestCase):
         self.assertEqual(c2_data["vat_number"], "DE316472128")
         self.assertIn("73061", c2_data["postal_address"])
         self.assertIn("Ebersbach", c2_data["postal_address"])
+        self.assertEqual(c2_data["postcode"], "73061")
+        self.assertEqual(c2_data["city"], "Ebersbach")
+        self.assertEqual(c2_data["street"], "Diegelsbergerstr.")
+        self.assertEqual(c2_data["house_no"], "24")
 
     def test_22_companies_csv_reimport_preserves_enrichment(self):
         """
@@ -526,16 +544,52 @@ class TestEnrichmentScript(unittest.TestCase):
         self.assertEqual(after_resp.status_code, 200)
         after_data = after_resp.get_json()
 
-        # All enrichment fields must be preserved exactly
+        # All enrichment fields and parsed address components must be preserved exactly
         self.assertEqual(after_data["status"], before_data["status"])
         self.assertEqual(after_data["impressum_url"], before_data["impressum_url"])
         self.assertEqual(after_data["legal_name"], before_data["legal_name"])
         self.assertEqual(after_data["postal_address"], before_data["postal_address"])
+        self.assertEqual(after_data["postcode"], before_data["postcode"])
+        self.assertEqual(after_data["city"], before_data["city"])
+        self.assertEqual(after_data["street"], before_data["street"])
+        self.assertEqual(after_data["house_no"], before_data["house_no"])
         self.assertEqual(after_data["vat_number"], before_data["vat_number"])
         self.assertEqual(after_data["phone"], before_data["phone"])
         self.assertEqual(after_data["email"], before_data["email"])
         self.assertEqual(after_data["responsible_person"], before_data["responsible_person"])
         self.assertEqual(after_data["raw_json"], before_data["raw_json"])
+
+    def test_23_parsed_address_fields_stored_in_postgres(self):
+        """
+        Tests that individual columns postcode, city, street, house_no
+        are stored and queryable directly in PostgreSQL database table 'companies'.
+        """
+        import enrich_companies
+
+        conn = enrich_companies.get_connection()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT company_name, postcode, city, street, house_no, postal_address
+                FROM companies
+                WHERE company_name IN ('nutrimmun GmbH', 'Barolo & Champagne GbR')
+                ORDER BY company_name;
+            """)
+            rows = {r["company_name"]: r for r in cur.fetchall()}
+        conn.close()
+
+        self.assertIn("nutrimmun GmbH", rows)
+        n = rows["nutrimmun GmbH"]
+        self.assertEqual(n["postcode"], "48155")
+        self.assertEqual(n["city"], "Münster")
+        self.assertEqual(n["street"], "Am Mittelhafen")
+        self.assertEqual(n["house_no"], "56")
+
+        self.assertIn("Barolo & Champagne GbR", rows)
+        b = rows["Barolo & Champagne GbR"]
+        self.assertEqual(b["postcode"], "73061")
+        self.assertEqual(b["city"], "Ebersbach")
+        self.assertEqual(b["street"], "Diegelsbergerstr.")
+        self.assertEqual(b["house_no"], "24")
 
 
 if __name__ == "__main__":

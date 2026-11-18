@@ -390,6 +390,11 @@ def evaluate_extraction_status(
         return CompanyStatus.PARSING_FAILED, {
             "legal_name": fallback_company_name,
             "postal_address": None,
+            "postcode": None,
+            "city": None,
+            "street": None,
+            "house_no": None,
+            "country": None,
             "handelsregister": None,
             "vat_number": None,
             "phone": None,
@@ -402,14 +407,43 @@ def evaluate_extraction_status(
     legal_name = str(raw_comp).strip() if raw_comp else (fallback_company_name or None)
 
     addr_obj = parsed_json.get("postal_address")
-    if not isinstance(addr_obj, dict):
-        addr_obj = {}
+    street = None
+    house_no = None
+    postcode = None
+    city = None
+    country = None
 
-    street = str(addr_obj.get("street") or "").strip() or None
-    house_no = str(addr_obj.get("house_no") or "").strip() or None
-    postcode = str(addr_obj.get("postcode") or "").strip() or None
-    city = str(addr_obj.get("city") or "").strip() or None
-    country = str(addr_obj.get("country") or "").strip() or None
+    if isinstance(addr_obj, dict):
+        street = str(addr_obj.get("street") or "").strip() or None
+        house_no = str(addr_obj.get("house_no") or "").strip() or None
+        postcode = str(addr_obj.get("postcode") or "").strip() or None
+        city = str(addr_obj.get("city") or "").strip() or None
+        country = str(addr_obj.get("country") or "").strip() or None
+    elif isinstance(addr_obj, str) and addr_obj.strip():
+        # Fallback string parser: e.g. "Am Mittelhafen 56, 48155 Münster, Deutschland"
+        raw_str = addr_obj.strip()
+        m_full = re.search(r"(.*?)\s+(\d+[\w\s/-]*),\s*(\d{5})\s+([^,]+)(?:,\s*(.*))?$", raw_str)
+        if m_full:
+            street = m_full.group(1).strip()
+            house_no = m_full.group(2).strip()
+            postcode = m_full.group(3).strip()
+            city = m_full.group(4).strip()
+            if m_full.group(5):
+                country = m_full.group(5).strip()
+
+    # Normalization: separate house_no if attached to street
+    if street and not house_no:
+        m_str = re.match(r"^(.*?)\s+(\d+[\w\s/-]*)$", street)
+        if m_str:
+            street = m_str.group(1).strip()
+            house_no = m_str.group(2).strip()
+
+    # Normalization: separate postcode if attached to city
+    if city and not postcode:
+        m_cit = re.match(r"^(\d{5})\s+(.*)$", city)
+        if m_cit:
+            postcode = m_cit.group(1).strip()
+            city = m_cit.group(2).strip()
 
     handelsregister = str(parsed_json.get("handelsregister") or "").strip() or None
     vat_number = str(parsed_json.get("vat_number") or "").strip() or None
@@ -458,6 +492,11 @@ def evaluate_extraction_status(
     mapped = {
         "legal_name": legal_name,
         "postal_address": postal_address,
+        "postcode": postcode,
+        "city": city,
+        "street": street,
+        "house_no": house_no,
+        "country": country,
         "handelsregister": handelsregister,
         "vat_number": vat_number,
         "phone": phone,

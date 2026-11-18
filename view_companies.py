@@ -90,9 +90,9 @@ def print_table(rows):
         print("\n[!] No companies found in PostgreSQL.")
         return
 
-    print("\n" + "=" * 115)
-    print(f" {'ID':<4} | {'Company Name':<26} | {'Status':<16} | {'Postal Address':<36} | {'VAT / Register'}")
-    print("=" * 115)
+    print("\n" + "=" * 140)
+    print(f" {'ID':<4} | {'Company Name':<22} | {'Status':<16} | {'Street & HouseNo':<24} | {'Postcode & City':<22} | {'VAT / Register'}")
+    print("=" * 140)
 
     status_counts = {}
     for r in rows:
@@ -101,9 +101,12 @@ def print_table(rows):
         status_counts[st_name] = status_counts.get(st_name, 0) + 1
 
         cid = str(r["id"])
-        cname = (r["company_name"] or "")[:26]
+        cname = (r["company_name"] or "")[:22]
         cstatus = st_name[:16]
-        caddr = (r["postal_address"] or "-")[:36]
+
+        street_no = " ".join(filter(None, [r.get("street"), r.get("house_no")])) or "-"
+        post_city = " ".join(filter(None, [r.get("postcode"), r.get("city")])) or "-"
+
         cvat_reg = []
         if r.get("vat_number"):
             cvat_reg.append(r["vat_number"])
@@ -111,13 +114,13 @@ def print_table(rows):
             cvat_reg.append(r["handelsregister"])
         extra = ", ".join(cvat_reg) if cvat_reg else "-"
 
-        print(f" {cid:<4} | {cname:<26} | {cstatus:<16} | {caddr:<36} | {extra}")
+        print(f" {cid:<4} | {cname:<22} | {cstatus:<16} | {street_no[:24]:<24} | {post_city[:22]:<22} | {extra}")
 
-    print("=" * 115)
+    print("=" * 140)
     print(f"Total companies in PostgreSQL: {len(rows)}")
     summary_parts = [f"{k}: {v}" for k, v in sorted(status_counts.items())]
     print(f"Breakdown: {', '.join(summary_parts)}")
-    print("=" * 115 + "\n")
+    print("=" * 140 + "\n")
 
 
 def print_detail_card(r):
@@ -132,12 +135,16 @@ def print_detail_card(r):
     print(f"  • Impressum URL:       {r.get('impressum_url') or '-'}")
     print(f"  • Legal Name:          {r.get('legal_name') or '-'}")
     print(f"  • Postal Address:      {r.get('postal_address') or '-'}")
+    print(f"  • Parsed Street:       {r.get('street') or '-'}")
+    print(f"  • Parsed House No:     {r.get('house_no') or '-'}")
+    print(f"  • Parsed Postcode:     {r.get('postcode') or '-'}")
+    print(f"  • Parsed City:         {r.get('city') or '-'}")
+    print(f"  • Country:             {r.get('country') or '-'}")
     print(f"  • Handelsregister:     {r.get('handelsregister') or '-'}")
     print(f"  • VAT Number:          {r.get('vat_number') or '-'}")
     print(f"  • Phone:               {r.get('phone') or '-'}")
     print(f"  • Email:               {r.get('email') or '-'}")
     print(f"  • Responsible Person:  {r.get('responsible_person') or '-'}")
-    print(f"  • Original CSV Fields: Country={r.get('country')}, City={r.get('city')}, Street={r.get('street')}")
     print(f"  • Timestamps:          Created: {r.get('created_at')} | Updated: {r.get('updated_at')}")
 
     if r.get("raw_json"):

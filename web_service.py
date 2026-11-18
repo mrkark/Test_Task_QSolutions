@@ -101,6 +101,17 @@ def init_db():
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
                 CREATE INDEX IF NOT EXISTS idx_companies_status ON companies (status);
+
+                -- Backfill individual parsed address columns from raw_json if they were NULL
+                UPDATE companies
+                SET
+                    postcode = COALESCE(companies.postcode, raw_json->'postal_address'->>'postcode'),
+                    city = COALESCE(companies.city, raw_json->'postal_address'->>'city'),
+                    street = COALESCE(companies.street, raw_json->'postal_address'->>'street'),
+                    house_no = COALESCE(companies.house_no, raw_json->'postal_address'->>'house_no'),
+                    country = COALESCE(companies.country, raw_json->'postal_address'->>'country')
+                WHERE raw_json IS NOT NULL
+                  AND (postcode IS NULL OR city IS NULL OR street IS NULL OR house_no IS NULL);
                 """
             )
         conn.commit()

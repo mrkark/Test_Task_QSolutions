@@ -77,6 +77,17 @@ def ensure_table_exists(conn):
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
             CREATE INDEX IF NOT EXISTS idx_companies_status ON companies (status);
+
+            -- Backfill individual parsed address columns from raw_json if they were NULL
+            UPDATE companies
+            SET
+                postcode = COALESCE(companies.postcode, raw_json->'postal_address'->>'postcode'),
+                city = COALESCE(companies.city, raw_json->'postal_address'->>'city'),
+                street = COALESCE(companies.street, raw_json->'postal_address'->>'street'),
+                house_no = COALESCE(companies.house_no, raw_json->'postal_address'->>'house_no'),
+                country = COALESCE(companies.country, raw_json->'postal_address'->>'country')
+            WHERE raw_json IS NOT NULL
+              AND (postcode IS NULL OR city IS NULL OR street IS NULL OR house_no IS NULL);
             """
         )
     conn.commit()
@@ -261,7 +272,8 @@ def enrich_companies(
         status_name = status.name
         print(f"    [+] Extraction Status: {status.value} ({status_name})")
         print(f"        * Legal Name:     {fields['legal_name']}")
-        print(f"        * Address:        {fields['postal_address']}")
+        print(f"        * Postal Address: {fields['postal_address']}")
+        print(f"        * Parsed:         Street='{fields.get('street')}', HouseNo='{fields.get('house_no')}', Postcode='{fields.get('postcode')}', City='{fields.get('city')}'")
         print(f"        * Register:       {fields['handelsregister']}")
         print(f"        * VAT:            {fields['vat_number']}")
         print(f"        * Phone / Email:  {fields['phone']} | {fields['email']}")
@@ -274,6 +286,11 @@ def enrich_companies(
             impressum_url=impressum_url,
             legal_name=fields["legal_name"],
             postal_address=fields["postal_address"],
+            postcode=fields.get("postcode"),
+            city=fields.get("city"),
+            street=fields.get("street"),
+            house_no=fields.get("house_no"),
+            country=fields.get("country"),
             handelsregister=fields["handelsregister"],
             vat_number=fields["vat_number"],
             phone=fields["phone"],
@@ -288,6 +305,11 @@ def enrich_companies(
             "status_name": status_name,
             "legal_name": fields["legal_name"],
             "address": fields["postal_address"],
+            "postcode": fields.get("postcode"),
+            "city": fields.get("city"),
+            "street": fields.get("street"),
+            "house_no": fields.get("house_no"),
+            "country": fields.get("country"),
             "vat": fields["vat_number"],
             "register": fields["handelsregister"],
         })
@@ -300,7 +322,10 @@ def enrich_companies(
     print("=" * 76)
     for r in results:
         st = r.get("status_name", str(r.get("status")))
-        print(f"  #{r['id']:<3} {r['name']:<28} [{st:<18}] {r.get('address') or r.get('error', '')}")
+        addr_summary = r.get('address') or r.get('error', '')
+        if r.get("postcode") and r.get("city"):
+            addr_summary = f"{r.get('street')} {r.get('house_no')}, {r.get('postcode')} {r.get('city')}"
+        print(f"  #{r['id']:<3} {r['name']:<28} [{st:<18}] {addr_summary}")
     print("=" * 76 + "\n")
     return results
 
@@ -318,7 +343,20 @@ def _update_company(conn, company_id: int, status: int = None, impressum_url: st
         updates.append("impressum_url = %s")
         vals.append(impressum_url)
 
-    for col in ("legal_name", "postal_address", "handelsregister", "vat_number", "phone", "email", "responsible_person"):
+    for col in (
+        "legal_name",
+        "postal_address",
+        "postcode",
+        "city",
+        "street",
+        "house_no",
+        "country",
+        "handelsregister",
+        "vat_number",
+        "phone",
+        "email",
+        "responsible_person",
+    ):
         if col in fields:
             updates.append(f"{col} = %s")
             vals.append(fields[col])

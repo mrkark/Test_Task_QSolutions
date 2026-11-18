@@ -77,6 +77,7 @@ docker compose ps
    * `2 (PARSING_FAILED)`: пустой ответ или нет распознанных полей;
    * `3 (ADDRESS_INCOMPLETE)`: реквизиты есть, но адрес неполный;
    * `4 (ERROR)`: ошибка сети / HTTP 4xx/5xx / ошибка API (обработка остальных компаний продолжается без падения).
+6. **Декомпозиция адреса**: извлеченный адрес сохраняется как в виде единой строки `postal_address`, так и распарсенным по отдельным колонкам PostgreSQL: `postcode` (PostalCode), `city` (City), `street` (Street), `house_no` (HouseNo) и `country` для дальнейших задач.
 
 #### Примеры запуска:
 ```bash
@@ -115,11 +116,11 @@ python enrich_companies.py --dry-run
 
 Утилита для наглядного отображения состояния таблицы `companies`:
 ```bash
-# Сводная таблица (ID, компания, статус, адрес, VAT, реестр)
+# Сводная таблица (ID, компания, статус, Street & HouseNo, Postcode & City, VAT, реестр)
 python view_companies.py
 # (или view_companies.bat)
 
-# Полная карточка всех реквизитов и raw_json:
+# Полная карточка всех реквизитов (включая распарсенные поля адреса) и raw_json:
 python view_companies.py --detail
 
 # Поиск конкретной компании:
@@ -140,7 +141,7 @@ python view_companies.py --db-host 192.168.1.100
   python -m unittest test_task3.py -v
   ```
 
-Набор включает 22 автотеста:
+Набор включает 23 автотеста:
 * Нормализация URL и регистронезависимый поиск Impressum/Imprint с фолбэком по `href`;
 * Очистка тегов HTML и алгоритм sandwich cut оптимизации токенов;
 * Логика выставления статусов `0 (OK)`, `1 (NO_IMPRESSUM)`, `2 (PARSING_FAILED)`, `3 (ADDRESS_INCOMPLETE)`, `4 (ERROR)`, `5 (NO_WEBSITE)`;
@@ -148,7 +149,8 @@ python view_companies.py --db-host 192.168.1.100
 * Интеграционные тесты веб-эндпоинтов `GET/POST /upload_companies`, `GET /companies`, `GET /companies/<name>`;
 * **Сквозные тесты на компаниях из `companies.csv`**:
   * `test_21_companies_csv_end_to_end` — загрузка `companies.csv`, проверка сохранения в БД, резолв ссылок и извлечение реквизитов;
-  * `test_22_companies_csv_reimport_preserves_enrichment` — проверка идемпотентности и сохранения результатов обогащения при повторном импорте.
+  * `test_22_companies_csv_reimport_preserves_enrichment` — проверка идемпотентности и сохранения результатов обогащения при повторном импорте;
+  * `test_23_parsed_address_fields_stored_in_postgres` — прямая проверка сохранения и корректности отдельных колонок `postcode`, `city`, `street`, `house_no` в PostgreSQL.
 
 ---
 
